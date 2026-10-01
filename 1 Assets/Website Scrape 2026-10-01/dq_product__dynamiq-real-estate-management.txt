@@ -1,0 +1,130 @@
+URL: https://dynamiqes.com/products/dynamiq-real-estate-management/
+TITLE: SAP B1 Real Estate Management Module | Streamline Property Sales & Financials
+META: Optimize your leasing, sales, and property management with IQ REM, a powerful real estate management system designed for SAP B1.
+
+# Smarter Real Estate Management with IQ REM for SAP Business One
+
+Optimize your real estate sales and financial processes with IQ REM, the powerful SAP Business One add-on built for developers and real estate professionals.
+
+INQUIRE NOW →
+
+IQ REM
+
+## Product Overview
+
+IQ REM is a powerful and versatile add-on for SAP Business One (SAP B1), specifically designed to streamline and enhance the management of real estate sales and associated financial transactions. Tailored for developers, real estate professionals, and businesses, IQ REM integrates seamlessly with SAP B1 to provide an all-in-one solution for handling the complexities of real estate operations.
+
+DynamIQ Real Estate Management empowers real estate businesses to focus on growth and customer satisfaction by reducing administrative burdens and increasing operational efficiency.
+
+## Features
+
+## Property / Unit Inventory
+
+IQ REM stores real estate units as SAP Business One Items under OITM, enriched with real estate-specific fields for property sales and inventory tracking.
+
+Each unit record includes Project, Building, Phase, Unit, Floor, Property, Unit Type, List Price, Price-per-SQM, Floor Area, Misc Fee, VAT, and Account Status.
+
+Units can be tracked as Available, Sold, or Reopen, giving users real-time visibility over unit availability directly inside SAP Business One.
+
+## Unit Owner / Buyer Information List
+
+The Unit Owner / Buyer Information List serves as the main operational dashboard for managing unit-owner records.
+
+Users can search, filter, create, view, edit, cancel, and manage records through a centralized grid. Records can also be filtered by Project and Building using cascading selections.
+
+The list supports ACTIVE, CANCELED, and TRANSFER status tracking, with changes cascading to the related unit’s item flags and the buyer’s business-partner flags.
+
+It also provides launch points for the Payment Plan and Reports / Statement of Account (SOA).
+
+## Unit Owner / Buyer Information Form
+
+The Unit Owner / Buyer Information Form is the detailed registration screen used to link a specific unit to its buyer or owner record.
+
+The form captures Unit Code, Project, Phase, Building, Unit, Floor, Property, Unit Type, Primary Owner, Co-owner, and Contract Type.
+
+It also records the full sales-team chain, including Broker, Override, Property Specialist, Sales Manager, Sales Director, and Sales Division Head.
+
+Additional fields include Sales Source, Group Performance tagging, RF Date, and Date Sold.
+
+## Payment Plan
+
+The Payment Plan acts as the financial engine of the sale. It computes the full contract amount, generates the payment structure, and creates the corresponding SAP Business One documents based on the configured client setup.
+
+The pricing computation follows this flow:
+List Price → Cascading Discounts → Net List Price → 12% VAT → Total Contract Price (TCP) → Misc Fee → Total Selling Price (TSP)
+
+The module also handles Reservation Fee, Spot DP, Additional DP, Deferred Payment, Net Balance, amortization schedules, financing details, Incoming Payments, OR numbers, checks, and deposits per term.
+
+## Uploader
+
+The Uploader supports mass data migration and onboarding through Excel.
+
+It imports owner data, unit-owner links, contract type, sales-team chain, source tagging, group tagging, RF Date, Date Sold, pricing details, payment plans, discounts, DP terms, schedules, and payment collections.
+
+Once uploaded, the system creates the corresponding owner records, payment headers, discount records, AR Invoices, and payment lines.
+
+It also flags the related SAP Items and Business Partners as active.
+
+## Technical Details
+
+## Unit Owner / Buyer Information List Details
+
+The dashboard supports New, View, Edit, Cancel, multi-select checkboxes, and drill-down access to related source units and business partners.
+
+The cancellation workflow can generate credit notes for unrealized AR Invoices and cancel related Incoming Payments. This action is gated by the CANCEL permission to ensure that only authorized users can process cancellations.
+
+The module is also permission- and client-aware, with labels switching to “Buyer Information” for the RCD client.
+
+## Payment Plan Details
+
+The Payment Plan supports cascading discounts such as Promo Discount, Commission Discount, Payment Discount, and Price Discount.
+
+Down-payment components include Reservation Fee, Spot DP, Additional DP, Deferred Payment, and Net Balance. Each component can be computed as an amount and percentage.
+
+For amortization, the module spreads the deferred amount over a defined number of months and calculates the DP Start Date, DP End Date, monthly payment amount, and misc fee distribution.
+
+Financing details include Takeout / Loanable Amount, In-house Financing Years, Bank Financing Years, and Bank Financing Due Date.
+
+Depending on configuration, the Payment Plan can generate service-type AR Invoices for TCP and Misc Fee under the PrimeHomes configuration, or Sales Orders for RCD.
+
+All payment-related data is persisted in custom tables, including the payment header, payment lines, and discounts. Records are tracked by status, such as ACTIVE, CANCELED, and TRANSFER.
+
+## Uploader Details
+
+The Uploader imports payment collections, including check number, check amount, check date, OR number, OR date, IP number, deposit number, and schedule lines.
+
+It also creates the corresponding owner records, payment headers, discount records, AR Invoices, and payment lines after upload.
+
+## Frequently Asked Questions (FAQ)
+
+What makes IQ REM different from other real estate management software?
+
+Unlike standalone real estate software, IQ REM is fully integrated with SAP Business One. This means your sales, billing, contracts, and financials all work from a single source of truth, reducing manual processes and enabling end-to-end visibility into your real estate business.
+
+Can IQ REM handle both residential and commercial property sales?
+
+Yes. IQ REM is built to support diverse property types, including residential units, commercial spaces, buildings, and subdivisions. You can customize unit classifications, pricing schemes, and contract types based on your project needs.
+
+Can we generate reports on unit availability and sales performance?
+
+Yes. IQ REM offers real-time dashboards and reporting tools that give you visibility into available inventory, sold units, customer payment status, and project performance, helping you make faster, data-driven decisions.
+
+Is IQ REM scalable as our real estate portfolio grows?
+
+Definitely. DynamIQ’s IQ REM is built to scale with your operations—whether you’re handling one development or managing multiple projects and locations. You can add more properties, users, and workflows as needed without disrupting your existing setup.
+
+How long does it take to implement IQ REM for an existing SAP B1 user?
+
+Typical implementation can take a few weeks, depending on the complexity of your real estate operations and the volume of historical data to be migrated. We conduct discovery, configuration, training, and testing to ensure a smooth rollout.
+
+Is customer data secure in the system?
+
+Yes. The IQ REM module follows SAP Business One’s security protocols, including user access controls and audit trails. Sensitive customer, financial, and property data is protected at every stage of the workflow.
+
+We'd like to hear from you
+
+Tell us about your business and we will show you how SAP Business One and the IQ Suite can streamline your operations, compliance and growth.
+
+Get Your Free Business Analysis →
+
+[tel:+639176304848] +63 917-630-4848

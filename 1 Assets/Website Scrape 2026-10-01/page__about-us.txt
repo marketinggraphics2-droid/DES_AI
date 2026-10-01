@@ -1,0 +1,221 @@
+URL: https://dynamiqes.com/about-us/
+TITLE: About DynamIQ — Filipino SAP Partner Since 2019
+META: Learn about DynamIQ Enterprise Solution – a Filipino IT consultancy and SAP Gold Partner committed to driving business efficiency and growth.
+
+# About DynamIQ
+
+DYNAMIQ ENTERPRISE SOLUTIONS INC is a Philippine-based professional IT consultancy service that provides the right balance between applications and consulting to help businesses resolve challenges in managing their operations. We are more than just a software vendor. We devise a total ENTERPRISE RESOURCE PLANNING (ERP) SYSTEM experience that is truly customer-focused and remarkably life centered to sustain a balance between your personal and professional priorities.
+
+## Mission
+
+To be the preferred provider of business technology solutions and services for the small, medium, and large enterprises in the Philippines.
+
+## Vision
+
+To redefine the method of doing business in the country, through our excellent business technology solutions and services.
+
+## Our Core Values
+
+## DRIVEN
+
+Our company offers a wide range of technology based solutions, with the aim of helping businesses achieve their goals, improve their efficiency, and stay ahead of the competition.
+
+## DEPENDABLE
+
+We are committed to provide our clients with the most relevant and responsive IT support services, delivered with a customer-oriented, professional, in-depth, and, knowledgeable attitude.
+
+## DEDICATED
+
+The company is passionate in helping businesses improved their operational efficiency and productivity by continuously educating, training and, developing our experienced team members, to ensure that we adapt to the dynamic business landscape.
+
+## DATA SECURITY
+
+We are committed to ensuring the confidentiality, integrity, and availability of our customers' information by adhering to strict data security protocols.
+
+## Our Products
+
+We are more than just a software vendor. We devise a total ENTERPRISE RESOURCE PLANNING (ERP) SYSTEM experience that is truly customer-focused and remarkably life centered to sustain a balance between your personal and professional priorities. Here are some of our products:
+
+## SAP Business One
+
+SAP Business One is an application that lets you manage your entire business operations easily and effectively. It comes with built-in modules that represent the business areas of your operation.
+
+The main capabilities of the system range from financial management, sales and customer management, purchasing and inventory control, up to production planning, and project management. It also covers analytics and reporting so you can make timely decisions based on real-time data.
+
+SAP Business One is a full-scale and highly functional ERP system designed specifically for small businesses up to small and mid-size enterprises.
+VIEW PRODUCT →
+
+## IQ Ai
+
+IQ Ai is DynamIQ’s intelligent engine that enhances SAP Business One with Ai-powered insights. Using machine learning and intelligent automation, it turns complex business data into actionable recommendations, helping teams make smarter decisions faster.
+
+From sales forecasting to inventory management, IQ Ai streamlines workflows and reduces manual tasks. With real-time analytics and predictive insights, it empowers businesses to act proactively and stay ahead of trends.
+VIEW PRODUCT →
+
+## IQ People
+
+IQ People is an all-in-one Human Resource Information System that streamlines HR operations, payroll, timekeeping, employee engagement, talent management, and Philippine statutory compliance. Designed with intelligent automation, AI-powered capabilities, and mobile accessibility, it helps organizations build a more productive, connected, and future-ready workforce.
+VIEW PRODUCT →
+
+## IQ Ecom
+
+IQEcom is an enterprise-level e-commerce platform offering seamless SAP Business One integration for both B2B and B2C environments. It streamlines complex commerce through customer-specific pricing, real-time inventory synchronization across multiple warehouses, and automated sales workflows. The platform eliminates manual overhead, ensuring data accuracy and scalability for high-growth digital enterprises.
+VIEW PRODUCT →
+
+## IQ Portal
+
+Unlock the full potential of your SAP Business One system with our powerful add-on, designed to seamlessly enhance your ERP experience through the web. Our secure, user-friendly portal allows you to access and manage critical business data anytime, anywhere.
+
+Tailored to provide a lighter and faster experience, this solution empowers you to extend selected data and functionalities of SAP Business for better and more personalized user experience and integration to other 3rd party solutions. This ensures that you can streamline processes and respond to business needs effectively, all while enjoying the flexibility to work on your terms.
+VIEW PRODUCT →
+
+## IQ Tax
+
+While BIR’s intent to digitized is clear, many taxpayers oftentimes find themselves in disarray with the process because of its complicated forms and risky manual data entry. This is why businesses need a reliable accounting system in the Philippines.We have created an application suitably compatible with SAP Business One to reduce the tax filing bottlenecks and enhance paperless tax filing experience.
+
+DYNAMIQ BIR TAX MODULE, our proprietary taxation program, is designed to make tax filing and compliance easy and accessible at a click of a button. It is in compliance to the computerized accounting system (CAS) and in pursuance to BIR-issued Revenue Regulation (RR) 9-2009 and Revenue Memorandum 29-2002.
+VIEW PRODUCT →
+
+## IQ Workplace
+
+IQ Workplace is a centralized digital workspace that helps teams manage projects, tasks, and collaboration in one platform. Improve visibility, streamline workflows, and keep work organized across your organization.
+VIEW PRODUCT →
+
+## IQ Desk
+
+IQDesk is a comprehensive IT Service Management (ITSM) and helpdesk solution engineered to optimize support workflows through AI-driven ticketing and real-time escalation. By integrating robust asset lifecycle management and PAR tracking, the platform ensures organizational accountability and operational excellence, delivering a seamless, automated approach to modern IT service delivery.
+VIEW PRODUCT →
+
+## IQ Barcode
+
+DYNAMIQ BARCODING is a barcode inventory system and a third- party integration for SAP Business One (SAP B1). It utilizes the logistics using barcoding and scanning items.
+VIEW PRODUCT →
+
+## IQ Link
+
+IQ Link brings together various types of software sub-systems so that they create a unified single system. Software integration maybe required on the following situations i.e., integrating SAP B1 to the current POS system used or any other related software. IQ Link has a status report which lets you know if there are any data inconsistencies as well.
+VIEW PRODUCT →
+
+## IQ Tech Institute
+
+IQ Tech Institute provides SAP Business One training programs that help users develop practical ERP skills and improve system utilization. Equip your team with the knowledge needed to support more efficient day-to-day business operations.
+VIEW PRODUCT →
+
+## IQ REM
+
+IQ REM is a real estate management add-on built to extend SAP Business One for developers and real estate businesses. It centralizes property sales, contracts, billing, and financial transactions into one integrated platform, simplifying day-to-day operations.
+
+Fully embedded within SAP Business One, IQ REM operates from a single source of truth, eliminating manual work and disconnected systems. It supports residential, commercial, and mixed-use properties, with flexible configurations for unit types, pricing, and contracts to match each project’s requirements.
+VIEW PRODUCT →
+
+## Services We Offer
+
+SAP Business One is only as good as the company that implements it. The true value of SAP Business One lies dependently in the design that has been meticulously put together to serve your business demands not just today but a few years from now.
+
+GO TO SERVICES →
+
+## Hear From Our Customers
+
+”
+
+Experience with DynamIQ team, it’s really dynamic. It has been positive and collaborative. DynamIQ team shows strong technical expertise. Also, flexibility and commitment to ensuring that SAP Business One supports are complex business structures, especially with the two industries we are into. We especially appreciate…
+
+## Toyo Adtec Healthcare Products Inc.
+
+Read Toyo Adtec Healthcare Products Inc.'s Story →
+
+”
+
+With DynamIQ introducing SAP Business One to us, it’s actually a big help. DynamIQ is also easier to transact with. We have no experience kasi with SAP Business One first time namin na encounter si SAP Business One, the struggle is we don’t know the…
+
+## Tosoh Polyvin Corporation
+
+Read Tosoh Polyvin Corporation's Story →
+
+”
+
+As a subsidiary of Kenstand Investment Limited, an international trading company based in Hong Kong, Kenstand Philippines, Inc. has had an excellent experience with DynamIQ Enterprise Solution Inc. The implementation of SAP Business One (SAP B1) has significantly streamlined our operations. Sales orders and purchase…
+
+## Kenstand Philippines, Inc.
+
+Read Kenstand Philippines, Inc.'s Story →
+
+”
+
+Previously, we struggled with scheduling, which impacted the preparation of our financial reports. However, with SAP B1, our reporting process has become more efficient and customizable to meet our company's specific needs. So far, we are very satisfied with the support from DynamIQ
+
+## Florabel
+
+Read Florabel's Story →
+
+”
+
+Previously, we faced issues with inefficient manual processes, delayed financial reports, and outdated information. After implementing SAP B1, we've seen streamlined operations, improved data accuracy and reporting, and better financial management and compliance. The transition was smooth, thanks to the clear guidance and support from…
+
+## Ms. O. Ayun
+
+Read Ms. O. Ayun's Story →
+
+”
+
+The highlight in implementing the SAP B1 is that we are able to simplify the previous long processes that we were practicing. We appreciate the patience of DynamIQ with us. I also think DynamIQ was able to embrace us with our demands. We also appreciate…
+
+## Intelligent Skin Care
+
+Read Intelligent Skin Care's Story →
+
+”
+
+Thank you so much DynamIQ, to the whole team na nag ca-cater sa amin ngayon dahil ok na ok yung nagiging service nyo with us.
+
+## Spartans 3 Trading Corporation
+
+Read Spartans 3 Trading Corporation's Story →
+
+”
+
+SAP Business One became very attractive to us because it certainly provides what our business needs.
+
+## Cecile's Pharmacy
+
+Read Cecile's Pharmacy's Story →
+
+”
+
+With the help of DynamIQ, we were able to get accreditation from BIR. They were able to come up with the consolidation process which our previous provider cannot provide.
+
+## Group Finance Controller for MacroAsia Corporation
+
+Read Group Finance Controller for MacroAsia Corporation's Story →
+
+”
+
+Presline Steel Products Inc. is a prominent Filipino corporation established in 1993 with a core focus on manufacturing high-quality metal parts and products tailored to the needs of the Philippine market. I am Mary Grace Reyes, with an extensive 25-year tenure as the Head of…
+
+## Presline Steel Products Inc.
+
+Read Presline Steel Products Inc.'s Story →
+
+”
+
+Philippine Allied Enterprises Corporation (PAEC) started importing Bridgestone tires to the Philippines in the year 1953 and continues to be the sole distributor in the Philippines today. Having a lean and efficient organization with roughly 160 employees in addition to core management, we continue to…
+
+## VP for Finance Philippine Allied Enterprises Corp.
+
+Read VP for Finance Philippine Allied Enterprises Corp.'s Story →
+
+”
+
+Being accustomed to using manual reports for years, having SAP in our Accounting Systems is a very great relief. SAP B1 assist us in centralizing data and making our work easier it also allows us to be more productive because the centralized data eliminates the…
+
+## Metalink Manufacturing Corp.
+
+Read Metalink Manufacturing Corp.'s Story →
+
+We'd like to hear from you
+
+Tell us about your business and we will show you how SAP Business One and the IQ Suite can streamline your operations, compliance and growth.
+
+Get Your Free Business Analysis →
+
+[tel:+639176304848] +63 917-630-4848

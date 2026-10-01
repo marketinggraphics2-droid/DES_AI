@@ -1,0 +1,15 @@
+﻿# dependencies / runtime
+**/node_modules/
+2 Working/backend/data/
+2 Working/backend/.env
+
+# OS / editor
+Thumbs.db
+.DS_Store
+desktop.ini
+~$*
+*.tmp
+
+# large reference copies of the live theme (kept locally, re-fetchable)
+1 Assets/Live Chat Widget 2026-10-01/main.css (full theme, reference)
+1 Assets/Live Chat Widget 2026-10-01/main.js (full theme, reference)

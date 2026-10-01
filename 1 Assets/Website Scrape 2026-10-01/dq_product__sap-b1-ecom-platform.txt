@@ -1,0 +1,250 @@
+URL: https://dynamiqes.com/products/sap-b1-ecom-platform/
+TITLE: E-Commerce Platform Module for SAP B1 - DynamIQ
+META: Run e-commerce seamlessly with IQ Ecom for SAP Business One. Sync orders, inventory, and pricing while eliminating double encoding and manual errors.
+
+# Advance Your B2B and B2C E-commerce with IQEcom for SAP Business One
+
+IQEcom is DynamIQ’s enterprise-grade B2B and B2C e-commerce platform designed for businesses that go beyond simple online selling. It is built for real-world operations where pricing is negotiated, purchases require approval, and inventory needs to be tracked across multiple locations.
+
+INQUIRE NOW →
+
+IQ Ecom
+
+## Product Overview
+
+With IQEcom, you are not just putting products online. You are creating a structured and controlled buying experience that reflects how your business actually operates. Designed to work seamlessly with SAP Business One, IQEcom connects your front-end sales with your back-end operations. This means no double encoding, no disconnected systems, and a single, streamlined process from order to fulfillment.
+
+Multiple pricelists. One platform. Assign unique pricing per customer type, retail walk-ins, resellers, or tiered wholesalers. Each buyer logs in and sees only the price agreed with them. No manual overrides, no confusion.
+
+## Built for Smarter E-Commerce Growth
+
+Discover powerful features that enhance your online store’s performance—from product management to customer experience—helping you scale with confidence and control.
+
+## Real Time Financial Transparency
+
+Gain immediate access to the current balance and statement of accounts.
+
+## Real-Time Order Tracking
+
+Receive live updates on order status, including tracking numbers and courier information.
+
+## Specialized Discount Management
+
+Allows complex pricing configurations, including percentage or fixed amounts for different types of clients.
+
+## Multi-Warehouse Support
+
+Manage stock and fulfillment across multiple warehouse locations to ensure accurate inventory management.
+
+## Intelligent Product Visibility
+
+A permission system that shows or hides products based on who is logged in - a system where certain products are only visible to the right people
+
+## Seamless SAP Integration
+
+Automatically syncs warehouses and items while generating sales orders directly into SAP Business One to eliminate manual data entry.
+
+## Features
+
+IQEcom is a B2B e-commerce and Warehouse Management platform designed for SAP Business One-connected businesses. It supports online ordering, catalog management, purchasing workflows, checkout, payment handling, storefront management, deployment flexibility, and SAP B1 product data import.
+
+## B2B Shopping & Ordering
+
+IQEcom provides a complete shopping and ordering experience for B2B buyers.
+
+Buyers can browse products, use a persistent shopping cart, proceed through “Buy Now,” submit orders with shipping details and PO numbers, attach PO documents, track order status, request cancellations or returns, save products to a wishlist, and reorder past purchases with recalculated current pricing.
+
+Order history includes pagination and status filtering, while order status tracking follows the flow from Processing → Shipped → Delivered.
+
+## Reporting and Analytics
+
+IQDesk includes strong helpdesk reporting and analytics, with PDF export and period-over-period deltas.
+
+The analytics dashboard supports reporting across tickets, agents, SLA performance, resolution times, and assets.
+
+Payment Method
+
+Status
+
+Details
+
+Credit Card
+
+Supported
+
+Demo flow
+
+GCash
+
+Supported
+
+Demo flow with QR scan UI
+
+PayPal
+
+Supported
+
+Demo flow with login UI
+
+Cash on Delivery
+
+Supported
+
+Direct order placement
+
+## B2B Approval Workflow
+
+IQEcom includes a built-in approval workflow for purchase orders and quotes.
+When an order or quote triggers approval rules, it enters an Awaiting Approval state. The approver can review the request through the Approval Dashboard and either approve or reject it with comments.
+
+Approval requests are organized into Incoming and Outgoing views. Incoming requests are pending the logged-in approver’s action, while Outgoing requests are submitted by the logged-in user and awaiting someone else’s approval.
+
+Approved Orders move to Processing, while Rejected Orders move to Cancelled. Approved Quotes move to Submitted, while Rejected Quotes move to Rejected.
+The current implementation supports single-level approval, with one designated approver per request. If no specific approver is assigned, any Admin can respond.
+
+## Product, Catalog, and Storefront Management
+
+IQEcom includes admin tools for managing products, categories, variants, product visibility, storefront banners, and branding.
+
+Admins can create and update products, upload multiple product images, configure product variants, manage variant matrices, add key/value product attributes, and organize categories using a hierarchical category structure.
+Product visibility can be controlled through whitelist or blacklist rules by company, role, or individual user.
+
+Storefront management includes homepage promotional banners with configurable images, titles, subtitles, CTA button text, and CTA links. Branding and theming can also be configured through primary and secondary colors in System Settings.
+
+IQEcom does not currently include a general-purpose page CMS for custom pages such as “About Us” pages.
+
+## SAP Business One Product Import
+
+IQEcom supports SAP Auto-Import for product data.
+
+Admins can import products from SAP Business One using either the UDF-match or auto-import strategy. This allows SAP B1 product information to be brought into the IQEcom catalog without relying on CSV or Excel bulk uploads.
+
+CSV or Excel bulk product import is not currently implemented. Products are managed through individual CRUD forms in the admin dashboard or imported from SAP Business One.
+
+## Promotions and Customer Pricing
+
+IQEcom includes promotional and pricing tools for storefront campaigns and customer-specific pricing.
+
+Promotional banners are fully manageable through the admin dashboard. Discounts and promotions can be scoped by product, category, company, or role, with scheduled start and end dates for timed campaigns.
+
+The platform also supports period-based discounts, discount groups, and price-based promotions for specific customer segments. When discounts apply, checkout messaging such as “You’re saving X!” can be shown to the buyer.
+
+## B2C and Direct-to-Consumer Support
+
+Although IQEcom is primarily designed as a B2B platform, it also supports selected B2C and direct-to-consumer flows.
+
+Available B2C features include storefront browsing, hero banners, product carousels, category browsing, search and filtering, “Buy Now,” wishlist, order self-service, Cash on Delivery, GCash, PayPal, Credit Card options, promotional banners, discounts, and reorder.
+
+This allows IQEcom to support both business purchasing workflows and consumer-style buying experiences when needed.
+
+## Technical Specifications
+
+## Hosting and Deployment
+
+IQEcom supports flexible deployment through DynamIQ-hosted, self-hosted, or hybrid arrangements.
+
+In a DynamIQ-hosted setup, DynamIQ provisions and manages the infrastructure on behalf of the client. This can include CI/CD through GitHub Actions, where updates to the main branch build and publish updated Docker images.
+
+Watchtower auto-updater can also be enabled so deployments automatically pull and apply new versions.
+
+For self-hosted deployments, IQEcom uses a Docker-based setup designed for Windows Server 2019, Windows Server 2022, Windows 10, Windows 11, Linux Ubuntu, or Linux Debian.
+
+The self-hosted setup includes:
+
+Component
+
+Technology
+
+Frontend
+
+Flutter Web served through NGINX
+
+Backend API
+
+Node.js / Express
+
+Database
+
+External Microsoft SQL Server
+
+Orchestration
+
+docker-compose.yml
+
+Configuration
+
+.env file
+
+Auto-Updater
+
+Watchtower, optional
+
+IQEcom can also be deployed through IIS on Windows VMs as an alternative to Docker. The database connection is injected through environment variables, allowing the same containers to point to any MSSQL instance, whether local, cloud-hosted through Azure SQL, or on-premise.
+
+## Mobile Responsiveness and App Availability
+
+IQEcom is built with Flutter, allowing it to run across major platforms from a single codebase.
+
+Supported platforms include:
+
+- Web Browser, including Chrome, Edge, and Firefox
+
+- Windows Desktop App
+
+- Android Mobile App
+
+- iOS Mobile App
+
+This gives businesses flexibility to support browser-based ordering, desktop-based admin or operations workflows, and mobile access for customers or internal users.
+
+## Marketing Tools and Current Limitations
+
+IQEcom includes implemented tools for promotional banners, discounts, price-based promotions, and customer-segment pricing.
+
+Tool
+
+Status
+
+Promotional Banners
+
+Implemented
+
+Discounts & Promotions
+
+Implemented
+
+Price-Based Promotions
+
+Implemented
+
+Meta Tags / SEO
+
+Not Implemented
+
+Google Analytics
+
+Not Implemented
+
+Abandoned Cart Recovery
+
+Not Implemented
+
+Email Marketing
+
+Partial; nodemailer exists for password reset, but not marketing campaigns
+
+## Pricing
+
+IQEcom pricing is handled on a per-engagement basis and is not publicly listed as a fixed SaaS subscription.
+
+Pricing depends on the deployment model, number of users or concurrent sessions, selected modules, SAP integration requirements, branding, custom workflows, and additional customization needs.
+
+Pricing is handled commercially by DynamIQ based on the client’s requirements.
+
+We'd like to hear from you
+
+Tell us about your business and we will show you how SAP Business One and the IQ Suite can streamline your operations, compliance and growth.
+
+Get Your Free Business Analysis →
+
+[tel:+639176304848] +63 917-630-4848

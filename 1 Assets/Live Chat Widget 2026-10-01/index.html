@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DES chat widget — standalone copy of the live mockup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="chat-widget.css">
+<style>
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;font-family:var(--font-sans);font-size:var(--fs-body);line-height:var(--lh-body);color:var(--text);background:var(--bg-2);-webkit-font-smoothing:antialiased}
+.demo{max-width:720px;margin:0 auto;padding:48px var(--pad)}
+.demo h1{font-size:var(--fs-h3);margin:0 0 8px}
+.demo p{color:var(--soft);margin:0 0 6px}
+code{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:var(--fs-sm)}
+</style>
+</head>
+<body>
+<div class="demo">
+  <h1>DES — chat widget (copied from dynamiqes.com, 2026-10-01)</h1>
+  <p>Source: theme <code>dynamiqes-theme</code> v3.1.4, <code>template-parts/chatbot.php</code> markup + <code>.dq-chat</code> rules from <code>main.css</code>.</p>
+  <p>Pure CSS open/close via the hidden <code>#dqChatToggle</code> checkbox. No JavaScript in the live mockup; input and send are <code>disabled</code>.</p>
+  <p>Files: <code>chat-widget.html</code> (markup only), <code>chat-widget.css</code>, <code>tokens.css</code> (site :root variables), <code>IQ_Logo.svg</code>.</p>
+  <p>Click the orange launcher at the bottom right.</p>
+</div>
+<div class="dq-chat" id="dq-chat" data-mockup="true">
+	<input type="checkbox" id="dqChatToggle" class="dq-chat__toggle" aria-hidden="true" tabindex="-1">
+
+	<section class="dq-chat__panel" role="dialog" aria-label="DES" aria-modal="false">
+		<header class="dq-chat__head">
+			<span class="dq-chat__avatar"><img src="IQ_Logo.svg" alt="" width="22" height="22"></span>
+			<div class="dq-chat__title">
+				<span class="dq-chat__eyebrow">DynamIQ</span>
+				<strong>DES</strong>
+				<span class="dq-chat__status"><i aria-hidden="true"></i>Online · replies in minutes</span>
+			</div>
+			<label for="dqChatToggle" class="dq-chat__close" role="button" aria-label="Close chat"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></label>
+		</header>
+
+		<div class="dq-chat__body">
+			<p class="dq-chat__day">Today</p>
+
+			<div class="dq-chat__msg is-bot">
+				<span class="dq-chat__mini"><img src="IQ_Logo.svg" alt="" width="16" height="16"></span>
+				<div class="dq-chat__bubble">
+					Hi there! 👋 I’m DES, DynamIQ’s assistant. Something slowing your business down? Let’s figure it out together.					<time>9:41 AM</time>
+				</div>
+			</div>
+
+			<div class="dq-chat__msg is-bot">
+				<span class="dq-chat__mini"><img src="IQ_Logo.svg" alt="" width="16" height="16"></span>
+				<div class="dq-chat__bubble">
+					What can I help you with today?					<div class="dq-chat__chips" aria-label="Suggested replies">
+						<button type="button">Book a free demo</button>
+						<button type="button">SAP Business One pricing</button>
+						<button type="button">BIR CAS compliance</button>
+						<button type="button">Talk to a consultant</button>
+					</div>
+				</div>
+			</div>
+
+			<div class="dq-chat__msg is-user">
+				<div class="dq-chat__bubble">
+					We’re looking for a BIR-accredited accounting system for a 40-person company.					<time>9:42 AM</time>
+				</div>
+			</div>
+
+			<div class="dq-chat__msg is-bot">
+				<span class="dq-chat__mini"><img src="IQ_Logo.svg" alt="" width="16" height="16"></span>
+				<div class="dq-chat__bubble">
+					Great fit. SAP Business One with our IQ Tax module is BIR CAS-ready and scales well for teams your size. Want me to line up a free business analysis?					<time>9:42 AM</time>
+				</div>
+			</div>
+
+			<div class="dq-chat__msg is-bot is-typing" aria-label="Assistant is typing">
+				<span class="dq-chat__mini"><img src="IQ_Logo.svg" alt="" width="16" height="16"></span>
+				<div class="dq-chat__bubble"><span></span><span></span><span></span></div>
+			</div>
+		</div>
+
+		<footer class="dq-chat__composer">
+			<input type="text" placeholder="Type your message…" aria-label="Message" disabled>
+			<button type="button" class="dq-chat__send" aria-label="Send" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 11.5 21 3l-8.5 18-2.5-7.5L3 11.5z"/></svg></button>
+			<p class="dq-chat__note">Mockup — not connected yet</p>
+		</footer>
+	</section>
+
+	<label for="dqChatToggle" class="dq-chat__launcher" role="button" aria-label="Open chat">
+		<span class="dq-chat__hint" aria-hidden="true">Chat with us</span>
+		<svg class="dq-chat__ico-open" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" stroke-width="2.6"/></svg>
+		<svg class="dq-chat__ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+		<span class="dq-chat__badge" aria-hidden="true">1</span>
+	</label>
+</div>
+</body>
+</html>

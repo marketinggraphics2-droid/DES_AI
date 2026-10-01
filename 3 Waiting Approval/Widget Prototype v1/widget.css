@@ -1,0 +1,65 @@
+/* DES widget — additions on top of chat-widget.css (live site v3.1.4).
+   Only new classes / state overrides live here so the base file stays a verbatim copy. */
+
+/* composer is live now */
+.dq-chat__send{cursor:pointer;opacity:1;transition:background .2s,transform .2s var(--dq-ease),opacity .2s}
+.dq-chat__send:hover{background:var(--orange-2);transform:translateY(-1px)}
+.dq-chat__send:disabled{cursor:not-allowed;opacity:.45;transform:none}
+.dq-chat__composer input:disabled{opacity:.6}
+.dq-chat__note{letter-spacing:.14em}
+.dq-chat__note a{color:inherit;text-decoration:underline}
+
+/* header: "Chatting as" line + menu */
+.dq-chat__status.is-named i{background:var(--orange-2);box-shadow:0 0 0 3px rgba(var(--rgb-brand),.25)}
+.dq-chat__status button{all:unset;cursor:pointer;color:var(--orange-2);font-weight:700;margin-left:2px}
+.dq-chat__status button:hover{text-decoration:underline}
+.dq-chat__menu{position:relative;flex:none}
+.dq-chat__menu>button{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;border:1px solid rgba(var(--rgb-white),.14);background:rgba(var(--rgb-white),.06);color:rgba(var(--rgb-white),.85);cursor:pointer;transition:background .2s}
+.dq-chat__menu>button:hover{background:rgba(var(--rgb-white),.14);color:#fff}
+.dq-chat__menu ul{position:absolute;right:0;top:calc(100% + 8px);min-width:220px;margin:0;padding:6px;list-style:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);z-index:5;display:none}
+.dq-chat__menu.is-open ul{display:block}
+.dq-chat__menu li button{all:unset;display:block;width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;font-size:var(--fs-xs);font-weight:700;color:var(--text);cursor:pointer}
+.dq-chat__menu li button:hover{background:rgba(var(--rgb-brand),.08);color:var(--orange-deep)}
+
+/* bubbles: links, small print, system notes */
+.dq-chat__bubble a{color:var(--orange-deep);font-weight:700;text-decoration:underline;text-underline-offset:2px}
+.dq-chat__msg.is-user .dq-chat__bubble a{color:#fff}
+.dq-chat__bubble p{margin:0 0 8px}
+.dq-chat__bubble p:last-of-type{margin-bottom:0}
+.dq-chat__bubble ul{margin:6px 0 0 16px;padding:0}
+.dq-chat__bubble small{display:block;margin-top:6px;font-size:var(--fs-2xs);color:var(--faint);line-height:1.45}
+.dq-chat__bubble.is-notice{background:var(--panel);border-color:rgba(var(--rgb-brand),.35);font-size:var(--fs-xs);line-height:1.5}
+.dq-chat__bubble.is-notice strong{display:block;margin-bottom:4px;color:var(--orange-deep)}
+.dq-chat__msg.is-system{align-self:center;max-width:100%}
+.dq-chat__msg.is-system .dq-chat__bubble{background:transparent;border:0;box-shadow:none;padding:4px 10px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);text-align:center}
+
+/* chip variants */
+.dq-chat__chips.is-inline{grid-auto-flow:column;grid-auto-columns:1fr}
+.dq-chat__chips.is-inline button{justify-content:center;padding:10px 8px}
+.dq-chat__chips.is-inline button::after{display:none}
+.dq-chat__chips.is-rating{grid-template-columns:repeat(5,1fr);gap:6px}
+.dq-chat__chips.is-rating button{justify-content:center;aspect-ratio:1;max-height:48px;padding:0;border-radius:50%;font-size:var(--fs-sm)}
+.dq-chat__chips.is-rating button::after{display:none}
+.dq-chat__chips button.is-primary{background:var(--orange);border-color:var(--orange);color:#fff}
+.dq-chat__chips button.is-primary::after{color:#fff}
+.dq-chat__chips button.is-primary:hover{background:var(--orange-2);border-color:var(--orange-2);color:#fff}
+.dq-chat__chips button.is-quiet{background:transparent;border-color:var(--line);color:var(--soft)}
+.dq-chat__chips button.is-quiet::after{display:none}
+.dq-chat__chips button.is-quiet:hover{color:var(--text);border-color:var(--gray)}
+.dq-chat__chips.is-done button{pointer-events:none;opacity:.45}
+.dq-chat__chips.is-done button.is-picked{opacity:1;border-color:var(--orange);background:rgba(var(--rgb-brand),.1);color:var(--orange-deep)}
+.dq-chat__chips.is-done button.is-picked::after{content:"✓";transform:none}
+.dq-chat__chips.is-rating.is-done button.is-picked::after{display:none}
+
+/* per-message feedback (thumbs) */
+.dq-chat__fb{display:flex;gap:4px;justify-content:flex-end;margin-top:4px;opacity:0;transition:opacity .2s}
+.dq-chat__msg.is-bot:hover .dq-chat__fb,.dq-chat__fb.is-set,.dq-chat__msg.is-bot:focus-within .dq-chat__fb{opacity:1}
+.dq-chat__fb button{all:unset;cursor:pointer;width:26px;height:22px;display:grid;place-items:center;border-radius:6px;color:var(--faint);font-size:12px;line-height:1}
+.dq-chat__fb button:hover{background:rgba(var(--rgb-ink),.06);color:var(--text)}
+.dq-chat__fb button.is-on{color:var(--orange-deep);background:rgba(var(--rgb-brand),.12)}
+@media(hover:none){.dq-chat__fb{opacity:1}}
+
+/* message entrance */
+.dq-chat__msg{animation:dqIn .28s var(--dq-ease) both}
+@keyframes dqIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.dq-chat__msg{animation:none}}

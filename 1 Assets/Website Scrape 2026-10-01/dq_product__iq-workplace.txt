@@ -1,0 +1,65 @@
+URL: https://dynamiqes.com/products/iq-workplace/
+TITLE: IQ Workplace - DynamIQ
+META: 
+
+# IQ Workplace — Where work, communication, and AI finally live in one place
+
+From projects and tasks to chat, approvals, documents, and AI-assisted insight — IQ Workplace replaces the tangle of disconnected tools with a single, secure platform built for how modern teams actually work.
+
+INQUIRE NOW →
+
+IQ Workplace
+
+## Product Overview
+
+IQ Workplace by DynamIQ is an all-in-one work management platform that brings your projects, people, and processes together in one place. Plan work across flexible workspaces and projects, move it forward with configurable workflows and automations, and keep everyone aligned with built-in chat, meetings, and real-time updates — without ever leaving the platform.
+
+Every project adapts to your team: custom fields, saved views from Kanban to Gantt to Timeline, stage-based workflow gating, and reusable templates mean IQ Workplace fits your process instead of forcing you into someone else’s. Money fields and payment tracking, client records, and org-wide insights give leaders a clear line of sight from a single task all the way up to portfolio performance.
+
+Underpinning it all is IQ Ai, your built-in AI assistant that drafts tasks and automations, writes reports in plain language, summarizes threads, and surfaces the metrics that matter. With enterprise-grade multi-tenancy, fine-grained permissions, and deep integrations across Microsoft, GitHub, and beyond, IQ Workplace is ready for teams of any size — on desktop, mobile, or installed as an app.
+
+## Features
+
+## Projects and Tasks, Your Way
+
+Full project and task management with subtasks, dependencies, and typed relations. Configurable statuses, custom fields, task templates, recurring tasks, and bulk actions let you shape every project to your workflow — then save it as a template to reuse in seconds.
+
+## Views for Every Kind of Work
+
+See work the way that suits the moment: Kanban, Table, Calendar, Gantt, Timeline, Sheet, Canvas, Dashboard, and more. Build saved views, reusable filters, and custom dashboards with drag-and-drop blocks so every team gets the perspective it needs.
+
+## Workflows, Stages and Automation
+
+Turn statuses into true workflow stages with entry and exit gates — required fields, approvals, attachments, and checklists that keep work on track. A rules-based automation engine handles the repetitive work for you, with AI-assisted drafting, test runs, and full execution logs.
+
+## Real-time Collaboration
+
+Keep the conversation where the work happens: per-project channels, direct and group messages, @mentions, comments with reactions, voice and video calls, and scheduled meetings — all updating live. Org-wide announcements and an activity feed keep everyone in the loop.
+
+## Documents, Files and Forms
+
+Upload and preview files, pick from OneDrive, and build documents from templates with variable substitution. Share documents publicly with e-signature, generate forms with public submission links, and control access with per-user permissions and redeem tokens.
+
+## Insights and Reporting
+
+Get org-wide visibility across clients, projects, sectors, and folders. Build reports with user-defined formula columns, export to CSV, Excel, or PDF, or simply describe what you need and let "Create report with AI" build it for you.
+
+## IQAi — your built-in AI assistant
+
+A tenant-configurable AI assistant that drafts tasks, automations, and announcements, rewrites and summarizes content, explains your metrics, and answers questions in a dedicated assistant workspace — with connect-anywhere MCP integration for tools like Claude.
+
+## Enterprise Security and Administration
+
+Multi-tenant architecture with row-level isolation, multi-org membership, and single sign-on via Microsoft Entra. An additive, fine-grained permission model across tenant, workspace, and project levels gives you precise control over who can see and do what.
+
+## Integrations and Platform
+
+Connect GitHub, Microsoft Teams, and OneDrive, plus flexible per-project integrations. Brand the platform to your organization, install it as a PWA, and work from anywhere with a fully mobile-responsive experience.
+
+We'd like to hear from you
+
+Tell us about your business and we will show you how SAP Business One and the IQ Suite can streamline your operations, compliance and growth.
+
+Get Your Free Business Analysis →
+
+[tel:+639176304848] +63 917-630-4848

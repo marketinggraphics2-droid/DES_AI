@@ -1,0 +1,90 @@
+/* Copied verbatim from dynamiqes.com main.css v3.1.4 (2026-10-01) */
+/* ============================================================
+   Chatbot widget · MOCKUP (template-parts/chatbot.php)
+   Pure CSS: the launcher/close labels flip #dqChatToggle.
+   Styled on the site system: Roboto, ink→gray gradient + orange
+   radial glow (cta-panel), 14px card radius / 10px control radius,
+   hairline --line borders, warm --bg-2 surfaces, --frost glass.
+   ============================================================ */
+.dq-chat{position:fixed;right:28px;bottom:28px;z-index:1200;font-family:var(--font-sans);font-size:var(--fs-sm);line-height:var(--lh-body);color:var(--text);--dq-ease:cubic-bezier(.16,1,.3,1)}
+.dq-chat__toggle{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
+
+/* launcher · brand tile, same language as the IQ logo tiles + .btn-orange glow */
+.dq-chat__launcher{position:relative;display:grid;place-items:center;width:56px;height:56px;border-radius:14px;background:var(--orange);color:var(--color-on-accent);cursor:pointer;box-shadow:0 10px 30px -8px var(--orange-glow),0 2px 6px rgba(var(--rgb-ink),.12);transition:background .25s,transform .3s var(--dq-ease),box-shadow .35s}
+.dq-chat__launcher:hover{background:var(--orange-2);transform:translateY(-2px);box-shadow:0 18px 46px -8px var(--orange-glow),0 2px 6px rgba(var(--rgb-ink),.12)}
+.dq-chat__launcher svg{grid-area:1/1;transition:opacity .2s,transform .35s var(--dq-ease)}
+.dq-chat__ico-close{opacity:0;transform:rotate(-90deg) scale(.6)}
+.dq-chat__badge{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--color-ink);color:#fff;font-size:var(--fs-2xs);font-weight:700;line-height:20px;text-align:center;border:2px solid var(--color-surface)}
+/* "Chat with us" hint · glass pill that slides in beside the tile (desktop, closed state) */
+.dq-chat__hint{position:absolute;right:calc(100% + 12px);top:50%;transform:translateY(-50%) translateX(6px);white-space:nowrap;padding:9px 14px;border-radius:var(--r-pill);border:1px solid var(--line);background:var(--panel-glass);color:var(--text);font-size:var(--fs-xs);font-weight:700;letter-spacing:.02em;box-shadow:var(--shadow);backdrop-filter:var(--frost);-webkit-backdrop-filter:var(--frost);opacity:0;pointer-events:none;transition:opacity .25s,transform .35s var(--dq-ease)}
+.dq-chat__launcher:hover .dq-chat__hint{opacity:1;transform:translateY(-50%)}
+.dq-chat__toggle:checked~.dq-chat__launcher{background:var(--color-ink);box-shadow:0 10px 30px -10px rgba(var(--rgb-ink),.5)}
+.dq-chat__toggle:checked~.dq-chat__launcher:hover{background:var(--color-gray)}
+.dq-chat__toggle:checked~.dq-chat__launcher .dq-chat__ico-open{opacity:0;transform:rotate(90deg) scale(.6)}
+.dq-chat__toggle:checked~.dq-chat__launcher .dq-chat__ico-close{opacity:1;transform:none}
+.dq-chat__toggle:checked~.dq-chat__launcher .dq-chat__badge,.dq-chat__toggle:checked~.dq-chat__launcher .dq-chat__hint{display:none}
+
+/* panel · card surface: hairline border, 16px radius (cta-panel), --shadow-lg */
+.dq-chat__panel{position:absolute;right:0;bottom:72px;width:384px;max-width:calc(100vw - 32px);max-height:min(640px,calc(100vh - 128px));display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-lg),0 6px 18px rgba(var(--rgb-ink),.08);opacity:0;visibility:hidden;transform:translateY(14px) scale(.97);transform-origin:bottom right;transition:opacity .22s,transform .45s var(--dq-ease),visibility 0s .3s}
+.dq-chat__toggle:checked~.dq-chat__panel{opacity:1;visibility:visible;transform:none;transition:opacity .22s,transform .45s var(--dq-ease),visibility 0s}
+
+/* header · the cta-panel treatment: ink→gray gradient with the orange radial glow */
+.dq-chat__head{position:relative;display:flex;align-items:center;gap:14px;padding:18px 16px 18px 18px;background:var(--grad-dark);color:var(--color-on-accent);border-bottom:1px solid rgba(var(--rgb-brand),.25)}
+.dq-chat__head::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(320px 160px at 18% -30%,rgba(var(--rgb-brand),.38),transparent 65%)}
+.dq-chat__head>*{position:relative}
+.dq-chat__avatar{flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:12px;background:var(--orange);box-shadow:0 10px 24px -10px var(--orange-glow)}
+.dq-chat__avatar img{display:block;width:24px;height:24px}
+.dq-chat__title{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.dq-chat__eyebrow{font-size:var(--fs-2xs);font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:var(--orange-2)}
+.dq-chat__title strong{font-size:var(--fs-body);font-weight:700;letter-spacing:-.01em;line-height:var(--lh-heading)}
+.dq-chat__status{display:flex;align-items:center;gap:7px;margin-top:2px;font-size:var(--fs-xs);color:rgba(var(--rgb-white),.72)}
+.dq-chat__status i{width:8px;height:8px;border-radius:50%;background:#3DD68C;box-shadow:0 0 0 3px rgba(61,214,140,.22)}
+.dq-chat__close{flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:10px;border:1px solid rgba(var(--rgb-white),.14);background:rgba(var(--rgb-white),.06);color:rgba(var(--rgb-white),.85);cursor:pointer;transition:background .2s,border-color .2s,color .2s}
+.dq-chat__close:hover{background:rgba(var(--rgb-white),.14);border-color:rgba(var(--rgb-white),.28);color:#fff}
+
+/* conversation · warm --bg-2 surface, card-like bubbles */
+.dq-chat__body{flex:1;overflow-y:auto;padding:18px 16px 8px;background:var(--bg-2);display:flex;flex-direction:column;gap:12px;scrollbar-width:thin;scrollbar-color:rgba(var(--rgb-ink),.18) transparent}
+.dq-chat__day{align-self:center;margin:0 0 4px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:var(--faint)}
+.dq-chat__msg{display:flex;align-items:flex-end;gap:10px;max-width:88%}
+.dq-chat__msg.is-user{align-self:flex-end;flex-direction:row-reverse}
+.dq-chat__msg:has(.dq-chat__chips){max-width:100%} /* quick-reply rows span the full width */
+.dq-chat__msg:has(.dq-chat__chips) .dq-chat__bubble{flex:1}
+.dq-chat__mini{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--orange)}
+.dq-chat__mini img{display:block;width:15px;height:15px}
+.dq-chat__bubble{position:relative;padding:12px 14px 9px;border-radius:14px;color:var(--text);background:var(--card-grad);border:1px solid var(--line-2);box-shadow:0 1px 2px rgba(var(--rgb-ink),.04);font-size:var(--fs-sm);line-height:var(--lh-body)}
+.dq-chat__msg.is-bot .dq-chat__bubble{border-bottom-left-radius:6px}
+.dq-chat__msg.is-user .dq-chat__bubble{background:var(--orange);color:var(--color-on-accent);border-color:transparent;border-bottom-right-radius:6px;box-shadow:0 10px 30px -10px var(--orange-glow)}
+.dq-chat__bubble time{display:block;margin-top:5px;font-size:var(--fs-2xs);letter-spacing:.02em;color:var(--faint);text-align:right}
+.dq-chat__msg.is-user .dq-chat__bubble time{color:rgba(var(--rgb-white),.78)}
+/* quick replies · option rows in the .btn-ghost language, trailing arrow like every site CTA */
+.dq-chat__chips{display:grid;gap:8px;margin-top:12px}
+.dq-chat__chips button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;font:inherit;font-size:var(--fs-xs);font-weight:700;letter-spacing:.02em;color:var(--text);background:var(--ghost-bg);border:1.5px solid var(--line);border-radius:var(--r-pill);padding:10px 12px 10px 14px;cursor:pointer;transition:border-color .25s,background .25s,color .25s,transform .3s var(--dq-ease)}
+.dq-chat__chips button::after{content:"→";font-weight:700;color:var(--orange);transition:transform .3s cubic-bezier(.2,.7,.2,1)}
+.dq-chat__chips button:hover{border-color:var(--orange);background:rgba(var(--rgb-brand),.08);color:var(--orange-deep);transform:translateY(-2px)}
+.dq-chat__chips button:hover::after{transform:translateX(4px)}
+.dq-chat__msg.is-typing .dq-chat__bubble{display:flex;gap:5px;padding:13px 15px}
+.dq-chat__msg.is-typing .dq-chat__bubble span{width:7px;height:7px;border-radius:50%;background:rgba(var(--rgb-brand),.7);animation:dqChatDot 1.2s infinite ease-in-out}
+.dq-chat__msg.is-typing .dq-chat__bubble span:nth-child(2){animation-delay:.15s}
+.dq-chat__msg.is-typing .dq-chat__bubble span:nth-child(3){animation-delay:.3s}
+@keyframes dqChatDot{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-4px);opacity:1}}
+
+/* composer · the contact-form .field + .btn-orange */
+.dq-chat__composer{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;padding:12px 14px 10px;background:var(--panel);border-top:1px solid var(--line)}
+.dq-chat__composer input{min-width:0;height:44px;padding:11px 15px;border:1px solid var(--line);border-radius:10px;background:var(--bg-2);font:inherit;font-size:var(--fs-sm);color:var(--text);transition:border-color .2s,background .2s,box-shadow .2s}
+.dq-chat__composer input::placeholder{color:var(--faint)}
+.dq-chat__composer input:focus{outline:none;border-color:var(--orange);background:var(--panel);box-shadow:0 0 0 3px rgba(var(--rgb-brand),.13)}
+.dq-chat__send{display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:10px;background:var(--orange);color:var(--color-on-accent);box-shadow:0 10px 30px -10px rgba(var(--rgb-brand),.6);cursor:not-allowed;opacity:.6}
+.dq-chat__note{grid-column:1/-1;margin:2px 0 0;text-align:center;font-size:var(--fs-2xs);font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:var(--faint)}
+
+@media(max-width:600px){
+  .dq-chat{right:16px;bottom:16px}
+  .dq-chat__launcher{width:54px;height:54px}
+  .dq-chat__hint{display:none}
+  .dq-chat__panel{position:fixed;right:0;bottom:0;left:0;width:auto;max-width:none;max-height:min(86vh,calc(100vh - 16px));border-radius:16px 16px 0 0;border-bottom:0;transform-origin:bottom center}
+  /* the sheet covers the launcher's spot; the header X closes it */
+  .dq-chat__toggle:checked~.dq-chat__launcher{opacity:0;visibility:hidden;pointer-events:none}
+}
+@media(prefers-reduced-motion:reduce){
+  .dq-chat__panel,.dq-chat__launcher,.dq-chat__launcher svg,.dq-chat__hint,.dq-chat__chips button{transition:none}
+  .dq-chat__msg.is-typing .dq-chat__bubble span{animation:none}
+}

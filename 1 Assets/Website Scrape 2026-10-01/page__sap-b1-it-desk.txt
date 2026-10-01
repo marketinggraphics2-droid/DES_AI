@@ -1,0 +1,299 @@
+URL: https://dynamiqes.com/products/sap-b1-it-desk/
+TITLE: IT Service Management Module for SAP B1 - DynamIQ
+META: Simplify IT support with IQ Desk for SAP Business One. Manage tickets, track assets with PAR, automate workflows, and improve response efficiency.
+
+# IQDesk: Smarter IT Service, All in One Place.
+
+IQDesk is DynamIQ’s all-in-one IT Service Management (ITSM) and helpdesk solution built to make IT support simpler, faster, and easier to manage.
+
+INQUIRE NOW →
+
+IQ Desk
+
+## Product Overview
+
+IQDesk is DynamIQ’s all-in-one platform designed to simplify how businesses handle IT support, manage assets, and keep operations running smoothly. It goes beyond basic support by helping you stay in full control of your IT resources and other assets. With built-in Property Acknowledgement Receipt (PAR) tracking, you’ll always know who’s responsible for each asset, complete with proper documentation and e-signatures for accountability.
+
+DynamIQ Desk also uses smart automation to support your team by suggesting replies, summarizing tickets, and automatically routing requests, while providing a confidence level so agents can quickly assess the reliability of each response.
+
+## Smarter Tools for Modern Workflows
+
+Explore IQ Desk’s latest features designed to improve efficiency, simplify processes, and support effective day-to-day business operations.
+
+## Smart Help Desk
+
+- AI-assisted ticketing
+
+- Auto-drafted replies
+
+- Live agent escalation
+
+- Multi-channel support via portal, email, and chat
+
+- 24/7 first-line assistance
+
+## Ticket Management
+
+- Open, working, solved, and closed statuses
+
+- Resolution tracking
+
+- Timeline logs
+
+- Confidence-based AI response suggestions
+
+## Asset Management
+
+- Hardware and software asset tracking
+
+- Asset barcode support
+
+- Serial number and technical profile recording
+
+- Warranty, vendor, and purchase cost tracking
+
+- Property acknowledgement receipt with e-signature
+
+## Asset Audit & Reports
+
+- Barcode-based asset checking
+
+- Audit mode for asset validation
+
+- Check if the asset still exists/is still assigned
+
+- Upload and update assets using reports
+
+- Generate asset-based reports, including Belarc-style asset/system reports
+
+## User & Access Control
+
+- User directory
+
+- Department and company assignment
+
+- Check if the asset still exists/is still assigned
+
+- Role-based permissions
+
+- Module authorization
+
+## Automation & Integrations
+
+- AI knowledge-based assistance
+
+- Notification and email settings
+
+- Import/export and bulk upload
+
+- Integration with Telegram, WhatsApp, Slack, and Teams
+
+## AI Usage
+
+IQDesk uses a pluggable AI provider-abstraction layer, giving each deployment flexibility over which AI model provider powers the system.
+
+Supported providers include:
+
+- OpenAI, including the GPT-4o family
+
+- Anthropic Claude
+
+- Google Gemini
+
+- Azure OpenAI
+
+- Local models through Ollama
+
+The provider is selected and configured per instance. API keys are stored encrypted using AES-256-CBC, with only the last 4 characters shown in the UI.
+
+For RAG and embeddings, IQDesk uses ChromaDB with isolated vector collections per company.
+
+Because IQDesk supports external AI providers, data may be sent to the selected provider depending on the configured model. For private or air-gapped deployments, local AI through Ollama can be used.
+
+## Security and Data Privacy
+
+IQDesk includes encryption for sensitive credentials and supports secure deployment configurations.
+
+Area
+
+Details
+
+Credential Encryption
+
+SAP passwords, AI API keys, access tokens, and other sensitive credentials are encrypted at rest using AES-256-CBC.
+
+User Passwords
+
+User passwords are hashed using bcrypt with salt 10.
+
+Data in Transit
+
+TLS is supported in transit through NGINX and Let’s Encrypt in the documented deployment setup.
+
+Hosting Model
+
+IQDesk can be deployed as a self-hosted system, giving clients more control over infrastructure, data residency, and AI provider configuration.
+
+IQDesk is architecturally privacy-capable because it can be self-hosted and configured with local AI. However, no formal certifications such as GDPR, SOC 2, ISO, or HIPAA are currently claimed or implemented in the codebase.
+
+## Deployment Model
+
+IQDesk supports both cloud-hosted and self-hosted deployment models, but it is primarily designed as a self-hosted, per-client deployment.
+
+The platform is fully containerized through Docker and can run on-premise, on a client-owned cloud server, or on a private VM.
+
+The documented stack includes:
+
+- MSSQL 2022
+
+- ChromaDB
+
+- Express backend
+
+- Next.js frontend
+
+- NGINX reverse proxy
+
+- Let’s Encrypt SSL
+
+Production images are published to GitHub Container Registry, with optional Watchtower auto-updates.
+
+IQDesk can be cloud-hosted, but there is no managed multi-tenant SaaS billing model. It is deployed per client.
+
+For fully private or air-gapped AI use cases, self-hosting combined with Ollama is the preferred deployment path.
+
+## Helpdesk and Workflow Features
+
+## Ticket Management
+
+IQDesk provides a helpdesk workflow for managing customer, internal, or IT support tickets.
+
+Tickets can be submitted, tracked, assigned, responded to, and resolved through the platform. Ticket data can also be used for analytics such as ticket volume, backlog aging, First Response Time, MTTR, SLA compliance, and reopen rate.
+
+## SLA Management
+
+IQDesk has partial SLA management support.
+
+The current system supports SLA measurement and reporting, but does not yet include full SLA enforcement, proactive breach alerts, or escalation workflows.
+
+What exists:
+
+- dueDate, which is manual and optional
+
+- respondedAt, which records the first-response timestamp and is frozen on the first staff reply
+
+- resolvedTime
+
+- SLA Compliance %, based on tickets resolved on or before the due date
+
+- First Response Time
+
+- MTTR
+
+What does not currently exist:
+
+- No SLA policy engine
+
+- No auto-calculated targets by priority or category
+
+- No proactive breach detection job
+
+- No breach-warning alerts
+
+- No escalation rules or workflows
+
+- No dedicated “escalate” action in the automation engine
+
+- The automation engine currently supports only:
+
+- SET_FIELD
+
+- BLOCK_SAVE
+
+- TRIGGER_WEBHOOK
+
+SLA breach email alerts appear in the roadmap under Phase 6, but are not yet implemented.
+
+In summary, IQDesk supports SLA measurement and reporting, but SLA enforcement, breach alerts, and escalation are not yet available.
+
+## Reporting and Analytics
+
+IQDesk includes strong helpdesk reporting and analytics, with PDF export and period-over-period deltas.
+
+The analytics dashboard supports reporting across tickets, agents, SLA performance, resolution times, and assets.
+
+Reporting Area
+
+Details
+
+Ticket Volume
+
+Daily trend, priority distribution, status distribution, category distribution, and backlog aging buckets.
+
+Resolution Time
+
+MTTR in hours.
+
+First Response Time
+
+FRT tracking based on the first staff response.
+
+SLA Compliance
+
+SLA Compliance % based on tickets resolved on or before the due date.
+
+Reopen Rate
+
+Used as the closest equivalent to First Contact Resolution, although there is no true “First Contact Resolution” metric by name.
+
+Agent Performance
+
+Per-agent assigned tickets, open tickets, closed tickets, total replies, and average resolution hours.
+
+Asset Reports
+
+Asset state distribution and warranty expiry buckets.
+
+Available date ranges include: Last 30 days, This month, Last month, This year, All time, Custom date range. Analytics also support 60-second caching and PDF export.
+
+Current reporting limitations: No CSAT or satisfaction metric. No by-name First Contact Resolution rate.
+
+## Knowledge Base and Self-Service Portal
+
+## Knowledge Base
+
+The Knowledge Base supports full article CRUD, allowing agents to create, update, publish, and manage support articles.
+
+It includes:
+
+- Markdown editor for agents
+
+- Public and unauthenticated reading of published articles
+
+- Search
+
+- Category filtering
+
+- Author filtering
+
+- Pagination
+
+## Self-Service Portal
+
+The self-service portal allows customers to submit and track tickets without requiring agent permissions.
+
+Customers can also start live chats through the portal.
+
+IQDesk also includes an embeddable JavaScript chat widget using widget.js and a /widget iframe. This widget can be added to external websites and can use an AI copilot as first-line support.
+
+The AI copilot can provide RAG-grounded answers, support auto-ticket creation, and hand off conversations to human agents when needed.
+
+Public PAR, or Property Acknowledgement Receipt, signing is also supported through a tokenized link.
+
+We'd like to hear from you
+
+Tell us about your business and we will show you how SAP Business One and the IQ Suite can streamline your operations, compliance and growth.
+
+Get Your Free Business Analysis →
+
+[tel:+639176304848] +63 917-630-4848

@@ -1,0 +1,49 @@
+/* Site design tokens, copied from dynamiqes.com main.css v3.1.4 :root (2026-10-01) */
+:root{
+  color-scheme: light;
+  /* unified color palette */
+  --color-brand:#F88F10; --color-brand-light:#FFA83A; --color-brand-dark:#D97400;
+  --color-ink:#252324; --color-gray:#4F5257; --color-mist:#D9D9D9;
+  --color-surface:#FFFFFF; --color-surface-muted:#F5F4F2; --color-surface-warm:#FBFAF8;
+  --color-white:#FFFFFF; --color-black:#000000; --color-on-accent:var(--color-white);
+  --rgb-brand:248,143,16; --rgb-ink:37,35,36; --rgb-gray:79,82,87;
+  --rgb-white:255,255,255; --rgb-scrim:20,18,19; --rgb-night:9,13,20; --rgb-cool:214,221,227;
+
+  /* semantic color roles */
+  --orange:var(--color-brand); --orange-2:var(--color-brand-light); --orange-deep:var(--color-brand-dark);
+  --orange-glow:rgba(var(--rgb-brand),.5); --gray:var(--color-gray); --mist:var(--color-mist);
+  --grad-dark:linear-gradient(90deg,var(--color-ink) 0%,var(--color-gray) 140.31%);
+  --font-sans:"Roboto",sans-serif;
+  /* unified type scale */
+  --fs-2xs:.6875rem; /* 11px · tags / micro labels */
+  --fs-xs:.75rem; /* 12px · metadata / eyebrows */
+  --fs-sm:.875rem; /* 14px · compact copy / controls */
+  --fs-body:1rem; /* 16px · default reading size */
+  --fs-lede:clamp(1rem,.96rem + .2vw,1.125rem); /* 16–18px */
+  --fs-card:clamp(1.125rem,1.03rem + .4vw,1.375rem); /* 18–22px */
+  --fs-subheading:clamp(1.5rem,1.25rem + 1.2vw,2.25rem); /* 24–36px */
+  --fs-h3:clamp(1.25rem,1.1rem + .65vw,1.5rem); /* 20–24px */
+  --fs-h2:clamp(2rem,1.5rem + 2vw,3.25rem); /* 32–52px */
+  --fs-h1:clamp(2.5rem,1.7rem + 3.5vw,4.75rem); /* 40–76px */
+  /* hero headline · height-aware as well as width-aware, so a one-screen hero
+     still fits on short laptops instead of pushing its CTAs below the fold */
+  --fs-hero:clamp(1.875rem,1rem + 1.9vw + 1.1vh,4.25rem); /* 30–68px */
+  --fs-display:clamp(2.5rem,2rem + 2.2vw,3.625rem); /* 40–58px */
+  --lh-tight:1.08; --lh-heading:1.22; --lh-body:1.6; --lh-relaxed:1.7;
+  --wrap:1440px; --pad:clamp(20px,4vw,64px); --sec:clamp(64px,6vw,96px); --r:14px; --r-pill:10px;
+  --section-blend:clamp(48px,5vw,88px);
+  --hf-h:44px; --nav-h:64px; /* measured at runtime for the full-height hero */
+
+  /* LIGHT theme — the only theme */
+  --bg:var(--color-surface); --bg-2:var(--color-surface-muted);
+  --panel:var(--color-surface); --panel-2:var(--color-surface-muted);
+  --text:var(--color-ink); --soft:rgba(var(--rgb-ink),.72); --faint:rgba(var(--rgb-ink),.5);
+  --line:rgba(var(--rgb-ink),.12); --line-2:rgba(var(--rgb-ink),.07);
+  --field-bg:var(--color-surface); --ghost-bg:rgba(var(--rgb-ink),.02);
+  --card-grad:linear-gradient(180deg,var(--color-surface),var(--color-surface-warm));
+  --nav-bg:rgba(var(--rgb-white),.78); --nav-bg-2:rgba(var(--rgb-white),.93); --panel-glass:rgba(var(--rgb-white),.98);
+  --glow1:rgba(var(--rgb-brand),.1); --glow2:rgba(var(--rgb-cool),.55); --glow3:rgba(var(--rgb-brand),.06);
+  --sap-filter:none;
+  --shadow:0 20px 50px rgba(var(--rgb-ink),.1); --shadow-lg:0 40px 90px rgba(var(--rgb-ink),.14);
+}
+:root{--frost:blur(18px) saturate(125%);}

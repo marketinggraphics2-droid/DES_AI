@@ -1,0 +1,505 @@
+URL: https://dynamiqes.com/products/dynamiq-iq-link/
+TITLE: IQ Link Integration Module for SAP Business One | Connect POS, HRIS, & More
+META: Use DyanmIQ's IQ Link to bring together the different types of software you may be using. Click here to learn more about this SAP Business One Integration!
+
+# Integrate Your Systems Seamlessly with IQ Link for SAP Business One
+
+Connect SAP B1 to POS, e-commerce platforms, WMS, CRM tools, or custom legacy software. IQ Link ensures real-time or scheduled data syncing while monitoring for inconsistencies.
+
+INQUIRE NOW →
+
+IQ Link
+
+## Product Overview
+
+IQ Link, formerly IQHub, is a middleware integration platform purpose-built for SAP Business One.
+
+It acts as an intelligent bridge between SAP B1 and virtually any data source, including external databases, REST APIs, CSV/XML files, and other SAP B1 companies.
+
+IQ Link helps businesses automate data movement, transform records, schedule integrations, track errors, and sync transactions across SAP Business One and third-party systems without relying on manual uploads or disconnected workflows.
+
+## Features
+
+## Integration Engine
+
+The Integration Engine is the core of IQ Link. It allows users to configure how data moves from a source system to a target destination, including how fields are mapped, transformed, validated, and posted into SAP Business One or another connected system.
+
+Feature
+
+Details
+
+Visual Field Mapping
+
+Drag-and-drop-style wizard maps source columns to SAP target fields, including nested objects such as DocumentLines.ItemCode.
+
+Transformation Modes
+
+Direct, Custom (static/template values with {placeholder} substitution), SQL Lookup Query, Service Layer OData Query, Formula.
+
+Operation Modes
+
+Create (POST), Update (PATCH by key), Upsert (check-then-create-or-update).
+
+Auto-Create Dependencies
+
+Automatically creates missing master data (Projects, Warehouses, Distribution Rules, Payment Terms) before posting document
+
+SQL ↔ HANA Translation
+
+Supports automatic SQL Server to SAP HANA dialect translation for UserQuery migrations.
+
+FormattedSearches Remap
+
+Auto-remaps FMS QueryIDs between SAP companies by matching UserQuery descriptions.
+
+## Scheduling & Execution
+
+The Scheduling & Execution layer allows integrations to run manually or automatically based on configured schedules.
+
+Feature
+
+Details
+
+8 Schedule Types
+
+Supports Every N seconds, Every N minutes, Every N hours, Daily at specific times, Weekly with day + time entries, Monthly dates, Start of month, and End of month.
+
+Background Executor
+
+Runs as a Windows background service — integrations execute even with the dashboard closed
+
+Auto-Resume
+
+On server restart, all integrations with running status automatically resume
+
+Manual Trigger
+
+One-click "Execute Now" for ad-hoc runs
+
+Overlap Protection
+
+Prevents concurrent executions of the same integration
+
+Cancellation
+
+Mid-execution cancel support with row-level granularity
+
+## Error Handling & Retry
+
+IQ Link includes configurable error handling and retry controls to help prevent failed integrations from disrupting the entire sync process.
+
+Feature
+
+Details
+
+Error Policies
+
+Stop on first error, Continue on error, Retry then stop
+
+Configurable Retry
+
+1–N retry attempts with 2-second delay between attempts
+
+SAP Session Recovery
+
+Automatic re-authentication on 401 (session expiry) without counting as a retry
+
+Skip Synced Rows
+
+Deduplication via sync log — never re-processes a previously successful row
+
+Skip "Already Exists"
+
+Optionally marks SAP "already exists" errors as synced to prevent infinite retry loops
+
+## Audit Trail & Logging
+
+IQ Link provides detailed audit trail and logging features so every integration run can be reviewed, traced, and validated.
+
+Feature
+
+Details
+
+Per-Row Results
+
+Every row records SUCCESS or ERROR with the SAP response message
+
+Incremental Log Writing
+
+Log file updated in real-time as each row is processed (not just at batch end)
+
+Rolling Log Files
+
+Serilog with daily rotation, 30-day retention
+
+Sync Log Table
+
+Persistent IQHub_SyncLogs table tracking every processed row key + timestamp
+
+Last Synced At
+
+Per-integration timestamp of last successful sync
+
+Integration Import/Export
+
+Export integration configs as JSON for backup/migration; import to restore
+
+## Supported Integration Methods
+
+IQ Link supports multiple integration methods for moving data into and out of SAP Business One and other connected systems.
+
+Method
+
+Role
+
+Details
+
+REST (JSON/OData)
+
+Source & Destination
+
+Full SAP Service Layer proxy; Generic REST API connections with Bearer, API Key, or platform-specific HMAC auth
+
+Direct SQL Database
+
+Source
+
+Connects directly to SQL Server databases, runs arbitrary queries, returns structured results
+
+CSV
+
+Source & Destination
+
+Import: File upload or folder watcher with auto-parse. Export: Bulk or transactional CSV generation with configurable delimiter
+
+XML
+
+Destination
+
+Bulk or per-transaction XML file export with configurable output folder and prefix
+
+SAP Service Layer (OData)
+
+Source & Destination
+
+Native OData queries ($filter, $select, $crossjoin) and full CRUD (POST/PATCH) on any SAP B1 module
+
+## Named Compatible Platforms
+
+## E-Commerce Platforms with Built-In Signed Auth
+
+IQ Link includes built-in signed authentication support for selected e-commerce platforms.
+
+Platform
+
+Auth Protocol
+
+Status
+
+Shopee
+
+HMAC-SHA256 (partner_id + path + timestamp + access_token + shop_id)
+
+✅ Production
+
+Lazada
+
+HMAC-SHA256 (sorted params, uppercase sign)
+
+✅ Production
+
+TikTok Shop
+
+HMAC-SHA256 (app_secret-wrapped signing)
+
+✅ Production
+
+## Generic REST API Compatibility
+
+Any platform that exposes a REST API can work out of the box through IQ Link’s Generic connection type.
+
+Platform
+
+Compatibility
+
+Notes
+
+WooCommerce
+
+✅
+
+REST API v3 with API Key/Secret or OAuth
+
+Magento
+
+✅
+
+REST API with Bearer token
+
+Toast POS
+
+✅
+
+REST API with Bearer or API Key
+
+Lightspeed
+
+✅
+
+REST API with OAuth Bearer token
+
+Xero
+
+✅
+
+REST API with OAuth 2.0 Bearer token
+
+Salesforce
+
+✅
+
+REST API with OAuth Bearer token
+
+HubSpot
+
+✅
+
+REST API with OAuth Bearer token
+
+Custom ERPs
+
+✅
+
+Any system with a REST/JSON endpoint
+
+## Data Flow Clarity
+
+IQ Link supports multiple source-to-destination flow directions. Each integration is configured independently, allowing users to define the source connection, destination connection, mapping logic, schedule, operation mode, and error handling policy per integration.
+
+Supported Flow Directions
+
+Flow Type
+
+Source → Destination
+
+Configurable?
+
+SAP → SAP
+
+Source SAP company → Destination SAP company
+
+✅ Per entity, per integration
+
+SQL → SAP
+
+External SQL Server DB → SAP B1 module
+
+✅ One-way, configurable per entity
+
+API → SAP
+
+External REST API → SAP B1 module
+
+✅ One-way, configurable per entity
+
+CSV → SAP
+
+CSV file upload or folder watch → SAP B1 module
+
+✅ One-way, configurable per entity
+
+SAP → CSV
+
+SAP B1 query → CSV file export
+
+✅ One-way, bulk or transactional
+
+SAP → XML
+
+SAP B1 query → XML file export
+
+✅ One-way, bulk or transactional
+
+API → API
+
+External REST API → External REST API
+
+✅ One-way, configurable per entity
+
+SQL → API
+
+SQL Server → External REST API
+
+✅ One-way, configurable per entity
+
+## Per-Integration Configuration
+
+IQ Link, formerly IQHub, is a middleware integration platform purpose-built for SAP Business One.
+
+It acts as an intelligent bridge between SAP B1 and virtually any data source, including external databases, REST APIs, CSV/XML files, and other SAP B1 companies.
+
+IQ Link helps businesses automate data movement, transform records, schedule integrations, track errors, and sync transactions across SAP Business One and third-party systems without relying on manual uploads or disconnected workflows.
+
+## Pricing
+
+IQ Link can be licensed based on the client’s deployment and integration requirements.
+
+Model
+
+Description
+
+Per Connection
+
+License fee based on the number of active SAP/DB/API connections
+
+Per Integration
+
+License fee based on the number of configured integrations
+
+Flat License
+
+Single deployment license with unlimited integrations and connections
+
+Subscription
+
+Monthly/annual SaaS-style subscription with support
+
+IQ Link has no per-transaction volume charges. Once licensed, it can process unlimited rows and transactions at no additional cost.
+
+This is a key differentiator against cloud iPaaS platforms that charge per API call.
+
+What’s Included:
+
+- Full middleware platform (backend + dashboard)
+
+- All integration types (SAP, SQL, API, CSV, XML)
+
+- Background scheduler with auto-resume
+
+- AES-256 credential encryption
+
+- Audit trail and logging
+
+- Docker deployment support
+
+## Implementation Timeline
+
+IQ Link implementation depends on the number of integrations, mapping complexity, source systems, validation requirements, and deployment setup.
+
+Phase
+
+Duration
+
+Activities
+
+Discovery & Setup
+
+1–2 days
+
+Install IQ Link on client server (Windows Service or Docker), configure SQL Server, connect to SAP Service Layer, verify connectivity
+
+Connection Configuration
+
+0.5–1 day
+
+Set up all SAP connections, DB connections, and API connections with credential encryption and testing
+
+Integration Design
+
+1–3 days per integration
+
+Design source queries, configure field mappings, set up transformation rules (lookups, custom values), define schedule
+
+Testing & Validation
+
+1–2 days per integration
+
+Preview source data, execute manual test runs, validate SAP document creation, review error handling
+
+Go-Live & Monitoring
+
+1 day
+
+Enable background scheduling, verify auto-resume, confirm logging and audit trail
+
+Handover & Training
+
+0.5–1 day
+
+Dashboard walkthrough, create/edit integration training, troubleshooting guide
+
+## Typical Integration Timelines
+
+Scenario
+
+Estimated Duration
+
+Discovery & Setup
+
+3–5 business days
+
+Connection Configuration
+
+1–2 weeks
+
+Complex (10+ integrations, SAP→SAP migration, e-commerce multi-platform)
+
+2–4 weeks
+
+Enterprise (multi-company, multi-platform, custom transformations)
+
+4–8 weeks
+
+## Frequently Asked Questions (FAQ)
+
+What types of systems can IQ Link integrate with SAP Business One?
+
+IQ Link can connect SAP B1 with a wide range of systems, including:
+
+- Point-of-Sale (POS) software
+
+- E-commerce platforms
+
+- Warehouse Management Systems (WMS)
+
+- CRM tools
+
+- Custom legacy systems
+
+If your software supports data exchange (via APIs, file-based imports, or database-level sync), it can likely be integrated through IQ Link.
+
+How does IQ Link handle data inconsistencies between systems?
+
+IQ Link features a built-in status report that flags mismatched or missing data in real time. This allows users to proactively correct issues before they affect operations or reporting, helping maintain data integrity across connected systems.
+
+Is the integration done in real time or in batches?
+
+IQ Link supports both real-time and scheduled (batch) data synchronization, depending on the needs and capabilities of the systems being integrated. Real-time syncing is ideal for operations like inventory or sales, while batch sync may suit reporting or legacy system updates.
+
+Can IQ Link be customized to fit our unique system architecture?
+
+Yes. IQ Link is highly adaptable and can be configured to match your specific business logic, field mappings, and data transformation requirements. Our team will assess your existing infrastructure and develop a custom integration plan that works for your operations.
+
+How do we monitor or troubleshoot integration issues?
+
+IQ Link includes a user-friendly dashboard where you can view integration logs, check status reports, and identify sync errors or delays. This transparency empowers your IT or operations team to quickly diagnose and resolve any issues.
+
+How long does integration with IQ Link usually take?
+
+The timeline depends on the number of systems being integrated and the complexity of their data structures. Simple one-way connections can be set up in a matter of days, while more complex bi-directional syncs may take several weeks.
+
+How do we know if IQ Link is the right solution for our integration needs?
+
+If you use multiple disconnected systems and want to centralize your data in SAP B1—or reduce the time spent on manual reconciliation—IQ Link is a smart solution. A consultation and system audit can help determine the best-fit integration strategy for your business.
+
+Will integrating systems via IQ Link affect our current SAP setup?
+
+No. IQ Link is designed to integrate without disrupting your existing SAP Business One configuration. It works alongside your current setup and enhances it by bridging data between platforms.
+
+We'd like to hear from you
+
+Tell us about your business and we will show you how SAP Business One and the IQ Suite can streamline your operations, compliance and growth.
+
+Get Your Free Business Analysis →
+
+[tel:+639176304848] +63 917-630-4848

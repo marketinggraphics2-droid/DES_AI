@@ -1,0 +1,89 @@
+URL: https://dynamiqes.com/products/dynamiq-portal/
+TITLE: SAP B1 Portal Module | Web-Based ERP Access Anytime, Anywhere
+META: Enhance SAP B1 with the DynamIQ Portal, a secure web-based extension for real-time access to sales, purchasing, inventory, and business data.
+
+# Elevate Your SAP Business One Experience with the DynamIQ Portal
+
+The DynamIQ Portal is a secure, web-based extension designed to enhance how teams interact with SAP Business One. Built or authorized users across your organization, it provides real-time access to critical business data—anytime, anywhere—while respecting role-based permissions.
+
+INQUIRE NOW →
+
+IQ Portal
+
+## Product Overview
+
+Unlock the full potential of your SAP Business One system with our powerful add-on, designed to seamlessly enhance your ERP experience through the web. Our secure, user-friendly portal allows you to access and manage critical business data anytime, anywhere.
+
+Tailored to provide a lighter and faster experience, this solution empowers you to extend selected data and functionalities of SAP Business for better and more personalized user experience and integration to other 3rd party solutions. This ensures that you can streamline processes and respond to business needs effectively, all while enjoying the flexibility to work on your terms.
+
+Elevate your SAP Business One experience and take control of your data today!
+
+## IQ Portal Features
+
+The DynamIQ Portal, considerably an ideal front-end interface, allows seamless integration to SAP Business One.
+
+## Sales
+
+- Sales Quotation
+
+- Sales Order
+
+- Sales Delivery
+
+- Sales Return
+
+## Purchasing
+
+- Purchase Request
+
+- Purchase Order
+
+- Good Receipt PO
+
+- Goods Return
+
+## Inventory
+
+- Goods Receipt
+
+- Goods Issue
+
+- Inventory Transfer Request
+
+- Inventory Transfer
+
+- Inventory Counting
+
+## Frequently Asked Questions (FAQ)
+
+Who can use the DynamIQ Portal?
+
+The portal is designed for authorized users within your organization, such as business owners, managers, and team members who need real-time access to business data. Permissions can be customized based on user roles.
+
+What kind of data can I access through the DynamIQ Portal?
+
+You can access all business data in your SAP Business One system, including sales, purchasing, inventory levels, approvals, and more. What data you can see through the DynamIQ portal will be based on your account’s access rights.
+
+How secure is the DynamIQ Portal?
+
+Security is a top priority. The portal uses end-to-end encryption and IQLicense to ensure secure and client-only access to protect sensitive business data.
+
+Can I use the DynamIQ Portal on mobile devices?
+
+Yes. The portal is fully responsive and optimized for desktops, tablets, and smartphones, allowing you to manage your business operations on the go.
+
+Is training required to use the DynamIQ Portal?
+
+The portal is designed to be intuitive and easy to navigate. However, the DynamIQ team is ready to assist and provide training and/or user guides to help your organization and/or new users get started quickly and confidently.
+
+How often is the data updated in the DynamIQ Portal?
+
+The portal provides real-time or near real-time data, depending on your system configuration. This ensures you always have access to the most current information available.
+
+We'd like to hear from you
+
+Tell us about your business and we will show you how SAP Business One and the IQ Suite can streamline your operations, compliance and growth.
+
+Get Your Free Business Analysis →
+
+[tel:+639176304848] +63 917-630-4848
