@@ -1,7 +1,7 @@
 {
   "name": "des-chat-backend",
   "version": "0.1.0",
-  "description": "DES \u2014 DynamIQ website assistant API (Express + Postgres/pgvector + Claude)",
+  "description": "DES — DynamIQ website assistant API (Express + Postgres/pgvector + Claude)",
   "type": "module",
   "private": true,
   "engines": {
@@ -16,7 +16,8 @@
     "retention": "node scripts/retention.js",
     "db:restore": "node scripts/restore-db.js",
     "bg": "node scripts/bg.js",
-    "stop": "node scripts/stop.js"
+    "stop": "node scripts/stop.js",
+    "test": "node tests/run.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.0",
@@ -26,5 +27,8 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.15",
     "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.3"
   }
 }

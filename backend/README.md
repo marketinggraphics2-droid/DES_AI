@@ -37,6 +37,10 @@ The local database (PGlite) is a folder of files and a hard kill can corrupt it.
 - Snapshots go to `<db folder>-backups/` on start, every 30 minutes and on clean stop (last 10 kept).
 - Restore: stop the backend, then `npm run db:restore` (newest) or `npm run db:restore -- <file>`. The current folder is kept as `.broken-<time>`.
 
+## Tests
+
+`npm test` runs the end-to-end suite (`tests/run.mjs`): it starts its own backend on :8790 with a fresh temporary database, covers rules, onboarding, chat (real AI, a few cents), strikes and bans, feedback, approved answers, admin API, widget and dashboard (jsdom), and database safety, then stops cleanly. About 2–3 minutes. Your real database is never touched.
+
 ## Endpoints
 
 | Method | Path | Auth | Purpose |

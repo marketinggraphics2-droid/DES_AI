@@ -11,6 +11,7 @@
     consentVersion: '2026-10-01',
     rememberDays: 30,
     idleSurveyMs: 3 * 60 * 1000,      // 3 min (demo page can override via window.DES_CFG)
+    onboardTimeoutMs: 5 * 60 * 1000,  // no name / contact for 5 min during onboarding -> chat starts over (warning 1 min before)
     typingMs: [350, 700],
     askMarketingOptIn: true,
     privacyUrl: 'https://dynamiqes.com/privacy-policy/',
@@ -28,7 +29,10 @@
       intro: `Happy to help with that! Before I answer, a quick formality: I'll collect your name and one contact so our team can follow up. By continuing you agree to our <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Privacy Notice</a>.<small>We never ask for passwords, IDs or payment details.</small>`,
       agree: 'I agree ✓', readNotice: 'Read the Privacy Notice',
       notYet: "No problem — tap <b>I agree</b> when you're ready. You can also browse our <a href=\"https://dynamiqes.com/products/\" target=\"_blank\" rel=\"noopener\">Products page</a> meanwhile.",
-      askName: 'Great, thanks. What\'s your name?',
+      askName: 'Great, thanks. What\'s your name?<small>The chat starts once I have your name and a way to reach you. If you leave, reload the page or don\'t reply for 5 minutes before then, it will start over.</small>',
+      onboardWarn: (what) => `Still there? I just need your ${what} to continue. <b>This chat will start over in 1 minute</b> if I don't hear from you.`,
+      onboardWhat: { consent: 'OK to the privacy notice', name: 'name', contact: 'email or mobile number', optin: 'answer on updates' },
+      onboardReset: 'This chat started over because I didn\'t get your name and contact in time. Ask your question again whenever you\'re ready.',
       nameFirst: "I'll get to that right after — may I have your name first?",
       badName: 'Just your name, please (letters only).',
       badNameFake: "Please share your real name so our team knows who they're talking to.",
@@ -74,7 +78,10 @@
       intro: `Sige, tutulungan kita diyan! Bago ako sumagot, kukunin ko lang ang pangalan mo at isang contact para maka-follow up ang team namin. Sa pagpapatuloy, sumasang-ayon ka sa aming <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Privacy Notice</a>.<small>Hindi kami humihingi ng password, ID o payment details.</small>`,
       agree: 'Sang-ayon ako ✓', readNotice: 'Basahin ang Privacy Notice',
       notYet: 'Walang problema — i-tap lang ang <b>Sang-ayon ako</b> kapag handa ka na.',
-      askName: 'Salamat! Anong pangalan mo?',
+      askName: 'Salamat! Anong pangalan mo?<small>Magsisimula ang chat kapag nakuha ko na ang pangalan mo at paraan para makontak ka. Kung aalis ka, magre-reload, o hindi sasagot nang 5 minuto bago noon, magsisimula ulit ang chat.</small>',
+      onboardWarn: (what) => `Nandiyan ka pa ba? Kailangan ko lang ang ${what} mo para magpatuloy. <b>Magsisimula ulit ang chat sa loob ng 1 minuto</b> kung walang sagot.`,
+      onboardWhat: { consent: 'pagsang-ayon sa privacy notice', name: 'pangalan', contact: 'email o mobile number', optin: 'sagot tungkol sa updates' },
+      onboardReset: 'Nagsimula ulit ang chat dahil hindi ko nakuha ang pangalan at contact mo sa oras. Itanong mo ulit kapag handa ka na.',
       nameFirst: 'Sasagutin ko \'yan pagkatapos — pwede bang malaman muna ang pangalan mo?',
       badName: 'Pangalan mo lang po (letra lang).',
       badNameFake: 'Pakibigay po ang tunay mong pangalan para alam ng team kung sino ang kausap nila.',
@@ -410,8 +417,18 @@
   }
 
   // ---------- onboarding (scripted, no LLM) ----------
+  // No name / contact within CFG.onboardTimeoutMs -> warn 1 min before, then start over (and say so).
+  const ONBOARD_STEPS = ['consent', 'name', 'contact', 'optin'];
+  function clearOnboardTimer() { clearTimeout(S.obWarn); clearTimeout(S.obReset); }
+  function armOnboardTimer() {
+    clearOnboardTimer();
+    if (!ONBOARD_STEPS.includes(S.step) || S.ended) return;
+    const step = S.step;
+    S.obWarn = setTimeout(() => { if (S.step === step && !S.busy) addBot(S.t.onboardWarn(S.t.onboardWhat[step] || S.t.onboardWhat.contact), { time: false }); }, Math.max(0, CFG.onboardTimeoutMs - Math.min(60000, CFG.onboardTimeoutMs * 0.2)));
+    S.obReset = setTimeout(() => { if (ONBOARD_STEPS.includes(S.step) && !S.busy) { emit('onboard.timeout', { step: S.step }); reset({ notice: S.t.onboardReset }); } }, CFG.onboardTimeoutMs);
+  }
   async function startOnboarding(firstMsg) {
-    S.held = firstMsg; S.step = 'consent';
+    S.held = firstMsg; S.step = 'consent'; armOnboardTimer();
     const t = S.t;
     await addBot(t.intro, { chips: [{ label: t.agree, cls: 'is-primary', on: consentGiven }, { label: t.readNotice, cls: 'is-quiet', on: async (_, bt) => { bt.closest('.dq-chat__chips').classList.remove('is-done'); bt.classList.remove('is-picked'); await showNotice(); } }] });
   }
@@ -420,10 +437,11 @@
     if (S.step !== 'consent') return;
     S.consent = { at: new Date().toISOString(), version: CFG.consentVersion, method: /^typed:/.test(method || '') ? method : 'chip', lang: S.lang };
     emit('consent', S.consent);
-    S.step = 'name'; updatePlaceholder(); await addBot(S.t.askName);
+    S.step = 'name'; updatePlaceholder(); armOnboardTimer(); await addBot(S.t.askName);
   }
   async function onboardingInput(text) {
     const t = S.t;
+    armOnboardTimer(); // any reply restarts the 5-minute window
     if (S.step === 'consent') { if (AFFIRM.test(text.trim())) return consentGiven('typed:' + text.trim().toLowerCase()); return addBot(t.notYet, { chips: [{ label: t.agree, cls: 'is-primary', on: consentGiven }] }); }
     if (S.step === 'name') {
       const v = text.trim();
@@ -455,12 +473,13 @@
     if (!contact || !contact.value) return contactProblem('contact_required');
     if (S.step !== 'contact') return; // chip tapped twice
     data.visitor = { name: S.tmpName, first: S.tmpName.split(' ')[0], contact: contact?.value || null, contact_type: contact?.type || null, consent: S.consent, marketing_opt_in: false, page_url: location.href, created_at: new Date().toISOString() };
-    if (CFG.askMarketingOptIn) { S.step = 'optin'; return addBot(S.t.optIn, { chips: [{ label: S.t.optYes, cls: 'is-primary', on: () => finishOptIn(true) }, { label: S.t.optNo, cls: 'is-quiet', on: () => finishOptIn(false) }], chipsCls: 'is-inline' }); }
+    if (CFG.askMarketingOptIn) { S.step = 'optin'; armOnboardTimer(); return addBot(S.t.optIn, { chips: [{ label: S.t.optYes, cls: 'is-primary', on: () => finishOptIn(true) }, { label: S.t.optNo, cls: 'is-quiet', on: () => finishOptIn(false) }], chipsCls: 'is-inline' }); }
     return finishOptIn(false);
   }
   async function finishOptIn(yes) {
     if (!data.visitor || !data.visitor.contact) { S.step = 'contact'; updatePlaceholder(); return contactProblem('contact_required'); }
     data.visitor.marketing_opt_in = !!yes;
+    clearOnboardTimer();
     setBusy(true);
     let j;
     try { j = await api.session(data.visitor); }
@@ -502,8 +521,8 @@
     } catch (e) {
       emit('error', { message: String(e.message || e) });
       if (e.sessionGone) { // session expired or no longer on the server: start over instead of showing an error
-        await addBot(S.lang === 'fil' ? 'Nag-expire na ang session mo. Magsimula tayo ulit.' : 'Your chat session expired. Let\'s start again.', { time: false });
-        setBusy(false); reset(); return;
+        setBusy(false);
+        return reset({ notice: S.lang === 'fil' ? 'Nag-expire na ang session mo. Magsimula tayo ulit.' : 'Your chat session expired. Let\'s start again.' });
       }
       await trouble('system: ' + (e.message || e));
     }
@@ -567,11 +586,14 @@
   sendBtn.addEventListener('click', () => send());
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 
-  function reset() {
+  async function reset(opts = {}) {
+    clearOnboardTimer();
     if (banActive()) { addBot(S.t.endedNotice(untilText(banActive())), { time: false }); return endChat(banActive()); }
     store.del('visitor'); data.visitor = null; S.step = 'idle'; S.held = null; S.ended = false; root.classList.remove('is-ended'); input.disabled = false; sendBtn.disabled = false; S.surveyDone = false; S.surveyOpen = false; S.botAnswers = 0; S.contactTries = 0; S.askedWorkEmail = false; S.pendingEmail = null;
     updatePlaceholder();
-    body.innerHTML = ''; body.append(el('p', 'dq-chat__day', 'Today')); setStatus(); emit('reset', {}); greet();
+    body.innerHTML = ''; body.append(el('p', 'dq-chat__day', 'Today')); setStatus(); emit('reset', {});
+    if (opts.notice) await addBot(opts.notice, { time: false });
+    greet();
   }
   async function greet() {
     const t = S.t;
