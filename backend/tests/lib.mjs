@@ -23,7 +23,11 @@ export function info(label, extra = '') {
   results.push({ section, label, status: 'info', extra });
   console.log(`INFO  ${label}${extra ? ' — ' + String(extra).replace(/\s+/g, ' ').slice(0, 140) : ''}`);
 }
-export async function guard(label, fn) { try { await fn(); } catch (e) { ok(label + ' (crashed)', false, e.stack || e.message); } }
+/** Runs a section; a crash or a hang (default 6 min) is reported as a failure instead of stopping the run. */
+export async function guard(label, fn, ms = 360000) {
+  let timer; const limit = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('section timed out after ' + Math.round(ms / 1000) + ' s')), ms); });
+  try { await Promise.race([fn(), limit]); } catch (e) { ok(label + (/timed out/.test(e.message) ? ' (timed out)' : ' (crashed)'), false, e.stack || e.message); } finally { clearTimeout(timer); }
+}
 
 // ---------------- isolated test backend ----------------
 export const ADMIN = 'test-admin-token-' + Math.random().toString(36).slice(2);

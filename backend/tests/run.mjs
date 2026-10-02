@@ -238,6 +238,9 @@ if (want('golden')) await guard('golden', async () => {
 sec('10. Admin API');
 if (want('admin')) await guard('admin', async () => {
   for (const p of ['/api/admin/overview', '/api/admin/leads', '/api/admin/golden']) ok(`${p} needs the admin token`, (await A.req('GET', p)).status === 401);
+  const pg = await A.req('GET', '/api/admin/conversations?limit=2&offset=0', { admin: true });
+  const pg2 = await A.req('GET', '/api/admin/conversations?limit=2&offset=2', { admin: true });
+  ok('conversations API: pages + total count header', Number(pg.headers.get('x-total-count')) > 2 && pg.json.length === 2 && pg2.json.length > 0 && pg.json[0].id !== pg2.json[0].id, pg.headers.get('x-total-count'));
   for (const p of ['overview?days=7', 'activity', 'conversations', 'products', 'products/IQ%20People', 'golden', 'facts', 'glossary', 'prompt', 'status', 'leads', 'review-queue', 'feedback/summary', 'kb']) {
     const r = await A.req('GET', '/api/admin/' + p, { admin: true }); ok(`GET /api/admin/${p}`, r.status === 200 && r.json !== null, r.status);
   }
@@ -403,8 +406,17 @@ if (want('dashboard')) await guard('dashboard', async () => {
   const go = async (h) => { P.w.location.hash = h; await sleep(250); await until(() => !P.$('#main .loading'), 15000); await sleep(400); };
   const pages = { '#/overview': () => P.$$('.kpi').length >= 8 && !!P.$('.chart svg'), '#/conversations': () => P.$$('tbody tr.is-click').length > 0, '#/leads': () => P.$('#main h1')?.textContent === 'Leads',
     '#/finetune/IQ%20People': () => P.$$('.plist button').length === 13 && !!P.$('.test') && !!P.$('.ptabs'), '#/review': () => P.$('#main h1')?.textContent === 'Needs review',
-    '#/kb': () => P.$$('tbody tr').length > 50, '#/settings': () => P.$$('input.mono').length > 5 && !!P.$('details textarea') };
+    '#/kb': () => P.d.querySelector('.paged tbody')?.children.length === 25 && !!P.$('.pager'), '#/settings': () => P.$$('input.mono').length > 5 && !!P.$('details textarea') };
   for (const [h, check] of Object.entries(pages)) { await go(h); await until(check, 8000); ok('page ' + h, check()); }
+  // pagination
+  await go('#/kb');
+  const firstKb = P.$('tbody tr td a')?.textContent;
+  ok('website pages: pager shows "1–25 of …"', /^1–25 of \d+/.test(P.$('.pager__info')?.textContent || ''), P.$('.pager__info')?.textContent);
+  [...P.$$('.pager button')].find((b) => b.textContent === '2').click(); await sleep(200);
+  ok('website pages: page 2 shows the next 25', /^26–/.test(P.$('.pager__info')?.textContent || '') && P.$('tbody tr td a')?.textContent !== firstKb, P.$('.pager__info')?.textContent);
+  ok('website pages: Prev enabled, current page marked', !P.$$('.pager button').find((b) => /Prev/.test(b.textContent)).disabled && P.$('.pager button.is-on')?.textContent === '2');
+  const search = P.$('#main input[type=search]'); search.value = 'iq people'; search.dispatchEvent(new P.w.Event('input')); await sleep(400);
+  ok('website pages: search resets to one short page', !P.$('.pager') || /^1–/.test(P.$('.pager__info').textContent));
   await go('#/finetune/IQ%20People');
   for (const tab of ['questions', 'notes', 'pages', 'answers']) { P.$(`.ptabs button[data-tab="${tab}"]`).click(); await sleep(150); ok('fine-tune tab: ' + tab, P.$('[role=tabpanel]').textContent.length > 20); }
   await go('#/conversations'); P.$('tr.is-click').click(); await until(() => P.$('.drawer .thread'), 8000);

@@ -234,6 +234,14 @@ td .muted, .muted { color: var(--ink-3); }
 .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+/* ---------- pagination ---------- */
+.pager { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--line-2); }
+.pager__info { margin-right: auto; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pager__gap { color: var(--ink-3); padding: 0 2px; }
+.pager .btn { min-width: 34px; justify-content: center; }
+.pager .btn.is-on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.card__body .pager, .qa + .pager { border-top: 0; padding: 12px 0 0; }
+
 /* ---------- small screens ---------- */
 @media (max-width: 1100px) { .grid--2 { grid-template-columns: 1fr; } .ft { grid-template-columns: 1fr; } .plist { position: static; max-height: none; display: flex; overflow-x: auto; gap: 4px; } .plist button { width: auto; white-space: nowrap; } .plist small, .plist__sep { display: none; } }
 @media (max-width: 760px) {

@@ -115,6 +115,12 @@ adminRouter.get('/conversations', wrap(async (req, res) => {
       and ($2::text is null or v.name ilike $2 or exists(select 1 from messages m where m.conversation_id=c.id and m.content ilike $2))
       and ($3::text is null or exists(select 1 from messages m where m.conversation_id=c.id and m.product=$3))
     order by c.started_at desc limit $4 offset $5`, [status, search_, product, limit, offset, req.query.all === '1'])).rows;
+  const total = (await q(`select count(*)::int n from conversations c join visitors v on v.id=c.visitor_id
+    where (c.turns > 0 or $4::boolean)
+      and ($1::text is null or c.status=$1)
+      and ($2::text is null or v.name ilike $2 or exists(select 1 from messages m where m.conversation_id=c.id and m.content ilike $2))
+      and ($3::text is null or exists(select 1 from messages m where m.conversation_id=c.id and m.product=$3))`, [status, search_, product, req.query.all === '1'])).rows[0].n;
+  res.set('x-total-count', String(total)).set('access-control-expose-headers', 'x-total-count');
   res.json(rows.map((x) => ({ ...x, contact: decrypt(x.contact) })));
 }));
 
@@ -172,7 +178,7 @@ adminRouter.get('/products/:name', wrap(async (req, res) => {
     from messages u
     left join lateral (select x.* from messages x where x.conversation_id=u.conversation_id and x.role='assistant' and x.id > u.id order by x.id limit 1) a on true
     where u.role='user' and (($1::text is null and u.product is null) or u.product=$1)
-    order by u.id desc limit 60`, [p])).rows;
+    order by u.id desc limit 300`, [p])).rows;
   const docs = p ? (await q(`select d.id, d.url, d.title, d.kind, d.status, d.updated_at, count(c.id)::int chunks
                              from kb_documents d join kb_chunks c on c.document_id=d.id where c.product=$1 group by d.id order by d.title`, [p])).rows : [];
   res.json({ product: name, notes: notes.notes, notes_updated_at: notes.updated_at, golden, questions, docs });

@@ -278,7 +278,7 @@ r.get('/admin/review-queue', admin, async (_req, res) => {
                          coalesce((select array_agg(distinct x) from feedback r, unnest(r.reasons) x where r.message_id = m.id and r.kind = 'thumb_reason'), f.reasons) reasons, f.rating, f.thumb,
                          (select content from messages u where u.conversation_id=m.conversation_id and u.role='user' and u.id < m.id order by u.id desc limit 1) question
                          from feedback f join messages m on m.id = f.message_id where (f.thumb = -1) and not exists (select 1 from golden_answers g where g.message_id = m.id)
-                         order by f.created_at desc limit 100`)).rows;
+                         order by f.created_at desc limit 300`)).rows;
   res.json(rows);
 });
 // POST /admin/golden lives in admin.js (it embeds the question so the answer can be matched live)

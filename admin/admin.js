@@ -219,6 +219,31 @@
       h('span', { class: 'hbar__n', text: n(r.n) }))));
   }
 
+  // ---------------- pagination ----------------
+  /** Pager bar: "1–25 of 81 · ‹ Prev 1 2 3 … 9 Next ›". Returns null when everything fits on one page. */
+  function pager(total, page, size, go) {
+    const pages = Math.ceil(total / size);
+    if (pages <= 1) return null;
+    const nums = [];
+    for (let i = 1; i <= pages; i++) { if (i === 1 || i === pages || Math.abs(i - page) <= 1) nums.push(i); else if (nums[nums.length - 1] !== '…') nums.push('…'); }
+    return h('nav', { class: 'pager', 'aria-label': 'Pages' },
+      h('span', { class: 'pager__info', text: `${n((page - 1) * size + 1)}–${n(Math.min(total, page * size))} of ${n(total)}` }),
+      h('button', { class: 'btn btn--sm', type: 'button', text: '‹ Prev', disabled: page <= 1, on: { click: () => go(page - 1) } }),
+      nums.map((x) => x === '…' ? h('span', { class: 'pager__gap', text: '…' })
+        : h('button', { class: 'btn btn--sm' + (x === page ? ' is-on' : ''), type: 'button', text: String(x), 'aria-current': x === page ? 'page' : null, 'aria-label': 'Page ' + x, on: { click: () => go(x) } })),
+      h('button', { class: 'btn btn--sm', type: 'button', text: 'Next ›', disabled: page >= pages, on: { click: () => go(page + 1) } }));
+  }
+  /** Client-side paging of an array: render(slice, offset) → node. */
+  function paged(items, size, render) {
+    const box = h('div', { class: 'paged' }); let page = 1;
+    const draw = (scroll) => {
+      const pages = Math.max(1, Math.ceil(items.length / size)); page = Math.min(Math.max(1, page), pages);
+      box.replaceChildren(...[render(items.slice((page - 1) * size, page * size), (page - 1) * size), pager(items.length, page, size, (x) => { page = x; draw(true); })].filter(Boolean));
+      if (scroll) box.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    };
+    draw(false); return box;
+  }
+
   // ---------------- overview ----------------
   async function pageOverview() {
     loading();
@@ -258,7 +283,7 @@
         ),
         h('section', { class: 'card', style: { alignSelf: 'start' } },
           h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Latest activity' }), h('p', { text: 'Chats, leads, handoffs and feedback, newest first.' }))),
-          act.length ? h('ul', { class: 'feed' }, act.map(feedItem)) : empty('No activity yet', 'Chats will show up here as soon as visitors use the widget.')),
+          act.length ? paged(act, 10, (slice) => h('ul', { class: 'feed' }, slice.map(feedItem))) : empty('No activity yet', 'Chats will show up here as soon as visitors use the widget.')),
       ),
     );
   }
@@ -277,17 +302,19 @@
 
   // ---------------- conversations ----------------
   async function pageConversations() {
-    const filters = { q: '', status: '', product: '', offset: 0 };
-    const tbody = h('tbody'), moreBtn = h('button', { class: 'btn', type: 'button', text: 'Load more', hidden: true });
+    const SIZE = 25;
+    const filters = { q: '', status: '', product: '', page: 1 };
+    const tbody = h('tbody'), pagerBox = h('div');
     const search = h('input', { class: 'input', type: 'search', placeholder: 'Search name or message…', 'aria-label': 'Search conversations' });
     const status = h('select', { class: 'input', 'aria-label': 'Status' }, h('option', { value: '', text: 'All statuses' }), h('option', { value: 'open', text: 'Open' }), h('option', { value: 'handed_off', text: 'Handed to sales' }), h('option', { value: 'closed', text: 'Closed' }), h('option', { value: 'ended', text: 'Ended by DES' }));
     const product = h('select', { class: 'input', 'aria-label': 'Product' }, h('option', { value: '', text: 'All products' }), state.status.products.filter((p) => p !== GENERAL).map((p) => h('option', { value: p, text: p })));
-    const load = async (append = false) => {
-      if (!append) { filters.offset = 0; tbody.replaceChildren(h('tr', null, h('td', { colspan: 7, class: 'loading', text: 'Loading…' }))); }
-      const qs = new URLSearchParams({ limit: 50, offset: filters.offset }); if (filters.q) qs.set('q', filters.q); if (filters.status) qs.set('status', filters.status); if (filters.product) qs.set('product', filters.product);
-      let rows; try { rows = await api('/admin/conversations?' + qs); } catch (e) { return fail(e); }
-      if (!append) tbody.replaceChildren();
-      if (!rows.length && !append) tbody.append(h('tr', null, h('td', { colspan: 7 }, empty('No conversations found', 'Try another filter.'))));
+    const load = async (page = 1, scroll = false) => {
+      filters.page = page;
+      tbody.replaceChildren(h('tr', null, h('td', { colspan: 7, class: 'loading', text: 'Loading…' })));
+      const qs = new URLSearchParams({ limit: SIZE, offset: (page - 1) * SIZE }); if (filters.q) qs.set('q', filters.q); if (filters.status) qs.set('status', filters.status); if (filters.product) qs.set('product', filters.product);
+      let rows, total; try { const r = await api('/admin/conversations?' + qs, { raw: true }); total = Number(r.headers.get('x-total-count')) || 0; rows = await r.json(); } catch (e) { return fail(e); }
+      tbody.replaceChildren();
+      if (!rows.length) tbody.append(h('tr', null, h('td', { colspan: 7 }, empty('No conversations found', 'Try another filter.'))));
       rows.forEach((c) => tbody.append(h('tr', { class: 'is-click', tabindex: '0', on: { click: () => openConversation(c.id), keydown: (e) => { if (e.key === 'Enter') openConversation(c.id); } } },
         h('td', { class: 'muted', text: when(c.started_at), style: { whiteSpace: 'nowrap' } }),
         h('td', null, h('div', { text: c.name, style: { fontWeight: 600 } }), h('div', { class: 'muted', text: c.contact || '' }), contactBadge(c.contact_type)),
@@ -298,18 +325,18 @@
           c.approved_used ? badge(`Approved ×${c.approved_used}`, 'badge--good') : null, c.thumbs_down ? badge(`👎 ${c.thumbs_down}`, 'badge--bad') : null,
           c.rating ? badge(`★ ${c.rating}`) : null, c.lang === 'fil' ? badge('Filipino') : null)),
         h('td', null, statusBadge(c.status)))));
-      moreBtn.hidden = rows.length < 50; filters.offset += rows.length;
+      pagerBox.replaceChildren(...[pager(total, page, SIZE, (x) => load(x, true))].filter(Boolean));
+      if (scroll) main.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
     };
-    search.addEventListener('input', debounce(() => { filters.q = search.value.trim(); load(); }));
-    status.addEventListener('change', () => { filters.status = status.value; load(); });
-    product.addEventListener('change', () => { filters.product = product.value; load(); });
-    moreBtn.addEventListener('click', () => load(true));
+    search.addEventListener('input', debounce(() => { filters.q = search.value.trim(); load(1); }));
+    status.addEventListener('change', () => { filters.status = status.value; load(1); });
+    product.addEventListener('change', () => { filters.product = product.value; load(1); });
     main.replaceChildren(
       top('Conversations', 'Every chat with DES. Open one to read it and turn a reply into an approved answer.'),
       h('section', { class: 'card' },
         h('div', { class: 'card__head' }, h('div', { class: 'filters' }, search, status, product)),
         h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, ['Started', 'Visitor', 'First question', 'Products', 'Turns', 'Signals', 'Status'].map((t, i) => h('th', { text: t, class: i === 4 ? 'num' : null })))), tbody)),
-        h('div', { class: 'card__body', style: { textAlign: 'center' } }, moreBtn)),
+        pagerBox),
     );
     load();
   }
@@ -376,9 +403,9 @@
     } } });
     main.replaceChildren(
       top('Leads', 'Visitors who shared a need. Update the status as sales follows up.', dl),
-      h('section', { class: 'card' }, rows.length ? h('div', { class: 'table-wrap' }, h('table', null,
+      h('section', { class: 'card' }, rows.length ? paged(rows, 25, (slice) => h('div', { class: 'table-wrap' }, h('table', null,
         h('thead', null, h('tr', null, ['Date', 'Visitor', 'Need', 'Products', 'Company', 'Opt-in', 'Status'].map((t) => h('th', { text: t })))),
-        h('tbody', null, rows.map((l) => {
+        h('tbody', null, slice.map((l) => {
           const sel = h('select', { class: 'input', 'aria-label': 'Lead status', on: { click: (e) => e.stopPropagation(), change: async (e) => { try { await api('/admin/leads/' + l.id, { method: 'PUT', body: { status: e.target.value } }); toast('Status updated'); } catch (err) { fail(err); } } } },
             LEAD_STATUSES.map((s) => h('option', { value: s, text: s[0].toUpperCase() + s.slice(1), selected: s === l.status })));
           return h('tr', { class: 'is-click', on: { click: () => l.conversation_id && openConversation(l.conversation_id) } },
@@ -389,7 +416,7 @@
             h('td', null, h('div', { text: l.company || '—' }), h('div', { class: 'muted', text: [l.industry, l.team_size].filter(Boolean).join(' · ') })),
             h('td', { text: l.marketing_opt_in ? 'Yes' : 'No' }),
             h('td', null, sel));
-        })))) : empty('No leads yet', 'DES saves a lead as soon as a visitor explains what they need.')),
+        }))))) : empty('No leads yet', 'DES saves a lead as soon as a visitor explains what they need.')),
     );
   }
 
@@ -475,7 +502,7 @@
     if (!d.golden.length) return h('div', null, empty('No approved answers yet', `Add the answers you want DES to give about ${name === GENERAL ? 'general topics' : name}. Start with questions visitors really ask (see the Visitor questions tab).`), h('div', { style: { textAlign: 'center' } }, add));
     return h('div', null, h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' } },
       h('span', { class: 'note', text: 'DES uses an answer when a visitor’s question matches its question or one of its variations.' }), add),
-    d.golden.map((g) => {
+    paged(d.golden, 10, (slice) => h('div', null, slice.map((g) => {
       const vars = String(g.variations || '').split('\n').filter(Boolean);
       const toggle = h('input', { type: 'checkbox', checked: g.active !== false, 'aria-label': 'Use in live chats' });
       toggle.addEventListener('change', async () => { try { await api('/admin/golden/' + g.id, { method: 'PUT', body: { active: toggle.checked } }); toast(toggle.checked ? 'Answer is live' : 'Answer paused'); refresh(); } catch (e) { toggle.checked = !toggle.checked; fail(e); } });
@@ -489,21 +516,21 @@
           h('span', { class: 'sp' }),
           h('button', { class: 'btn btn--sm', type: 'button', text: 'Edit', on: { click: () => openGolden(g) } }),
           h('button', { class: 'btn btn--sm btn--ghost btn--danger', type: 'button', text: 'Delete', on: { click: async () => { if (!confirm('Delete this approved answer?')) return; try { await api('/admin/golden/' + g.id, { method: 'DELETE' }); toast('Deleted'); refresh(); } catch (e) { fail(e); } } } })));
-    }));
+    }))));
   }
 
   function tabQuestions(d, name) {
     if (!d.questions.length) return empty('No questions yet', `Questions visitors ask about ${name === GENERAL ? 'general topics' : name} will appear here.`);
-    return h('div', { class: 'table-wrap' }, h('table', null,
+    return paged(d.questions, 15, (slice) => h('div', { class: 'table-wrap' }, h('table', null,
       h('thead', null, h('tr', null, h('th', { text: 'Visitor asked' }), h('th', { text: 'DES answered' }), h('th', { text: '' }))),
-      h('tbody', null, d.questions.map((q) => h('tr', null,
+      h('tbody', null, slice.map((q) => h('tr', null,
         h('td', { style: { minWidth: '220px' } }, h('div', { text: q.question, style: { fontWeight: 600 } }), h('div', { class: 'muted', text: ago(q.created_at) })),
         h('td', null, h('div', { class: 'clip', text: q.answer || '—', title: q.answer || '', style: { maxWidth: '420px' } }),
           h('div', { class: 'badges', style: { marginTop: '4px' } }, q.thumb === -1 ? badge('👎 disliked', 'badge--bad') : q.thumb === 1 ? badge('👍 liked', 'badge--good') : null,
             q.golden_ids ? badge('Used approved answer', 'badge--good') : null, q.blocked_reason ? badge(blockLabel(q.blocked_reason), 'badge--bad') : null)),
         h('td', { style: { whiteSpace: 'nowrap', textAlign: 'right' } },
           h('button', { class: 'btn btn--sm', type: 'button', text: 'Write approved answer', on: { click: () => openGolden({ question: q.question, ideal_answer: q.answer || '', product: name, message_id: q.answer_id ? Number(q.answer_id) : null }) } }), ' ',
-          h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Open chat', on: { click: () => openConversation(q.conversation_id) } })))))));
+          h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Open chat', on: { click: () => openConversation(q.conversation_id) } }))))))));
   }
 
   function tabNotes(d, name, refresh) {
@@ -604,12 +631,12 @@
         tile('Thumbs down', n(s.thumbs_down), `${n(s.thumbs_up)} thumbs up · 30 days`)),
       s.reasons?.length ? h('section', { class: 'card', style: { marginBottom: '16px' } }, h('div', { class: 'card__head' }, h('h2', { text: 'Why visitors disliked answers' })), h('div', { class: 'card__body' }, hbars(s.reasons.map((r) => ({ label: r.reason, n: r.n }))))) : null,
       h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('h2', { text: 'Disliked answers' })),
-        q.length ? h('div', { class: 'card__body' }, q.map((r) => h('article', { class: 'qa' },
+        q.length ? paged(q, 10, (slice) => h('div', { class: 'card__body' }, slice.map((r) => h('article', { class: 'qa' },
           h('div', { class: 'qa__q', text: r.question || '(question not found)' }),
           h('div', { class: 'qa__a', html: fmt(r.answer) }),
           h('div', { class: 'qa__foot' }, r.reasons?.length ? badge('👎 ' + r.reasons.join(', '), 'badge--bad') : badge('👎', 'badge--bad'), h('span', { class: 'sp' }),
             h('button', { class: 'btn btn--sm btn--primary', type: 'button', text: 'Write the right answer', on: { click: () => openGolden({ question: r.question || '', ideal_answer: r.answer, product: r.product || guessProduct(r.question), message_id: Number(r.message_id) }) } }),
-            h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Open chat', on: { click: () => openConversation(r.conversation_id) } })))))
+            h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Open chat', on: { click: () => openConversation(r.conversation_id) } }))))))
           : empty('Nothing to review', 'When a visitor gives an answer a thumbs down, it shows up here.')));
   }
   function guessProduct(text) {
@@ -623,10 +650,13 @@
     let kb; try { kb = await api('/admin/kb'); } catch (e) { return fail(e); }
     const kinds = ['all', ...new Set(kb.docs.map((d) => d.kind || 'page'))];
     let kind = 'all', term = '';
-    const tbody = h('tbody');
+    const listBox = h('div');
+    const head = () => h('thead', null, h('tr', null, h('th', { text: 'Page' }), h('th', { text: 'Type' }), h('th', { class: 'num', text: 'Passages' }), h('th', { text: 'Updated' }), h('th', { text: 'Used by DES' }), h('th', { text: '' })));
     const draw = () => {
       const rows = kb.docs.filter((d) => (kind === 'all' || (d.kind || 'page') === kind) && (!term || (d.title || '').toLowerCase().includes(term) || d.url.toLowerCase().includes(term)));
-      tbody.replaceChildren(...(rows.length ? rows.map((d) => kbRow(d, null)) : [h('tr', null, h('td', { colspan: 6 }, empty('No pages', 'Try another filter.')))]));
+      listBox.replaceChildren(rows.length
+        ? paged(rows, 25, (slice) => h('div', { class: 'table-wrap' }, h('table', null, head(), h('tbody', null, slice.map((d) => kbRow(d, null))))))
+        : empty('No pages', 'Try another filter.'));
     };
     const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Page type' }, kinds.map((k) => h('button', { type: 'button', class: k === 'all' ? 'is-on' : '', text: k === 'all' ? 'All' : k[0].toUpperCase() + k.slice(1), on: { click: (e) => { kind = k; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('is-on', b === e.currentTarget)); draw(); } } })));
     const search = h('input', { class: 'input', type: 'search', placeholder: 'Search pages…', 'aria-label': 'Search pages' });
@@ -646,7 +676,7 @@
       h('section', { class: 'card', style: { marginBottom: '16px' } }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Add or re-read a page' }), h('p', { text: 'Only dynamiqes.com addresses.' })), addForm)),
       h('section', { class: 'card' },
         h('div', { class: 'card__head' }, h('div', { class: 'filters' }, seg, search)),
-        h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, h('th', { text: 'Page' }), h('th', { text: 'Type' }), h('th', { class: 'num', text: 'Passages' }), h('th', { text: 'Updated' }), h('th', { text: 'Used by DES' }), h('th', { text: '' }))), tbody))),
+        listBox),
       kb.log.length ? h('section', { class: 'card', style: { marginTop: '16px' } }, h('div', { class: 'card__head' }, h('h2', { text: 'Recent reading activity' })),
         h('div', { class: 'table-wrap' }, h('table', null, h('tbody', null, kb.log.slice(0, 20).map((l) => h('tr', null,
           h('td', { class: 'muted', text: when(l.created_at), style: { whiteSpace: 'nowrap' } }), h('td', null, badge(l.ok ? 'OK' : 'Failed', l.ok ? 'badge--good' : 'badge--bad')),
