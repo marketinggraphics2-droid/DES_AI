@@ -11,12 +11,14 @@ import { classify, filterOutput, maskPII, detectLang } from '../src/guardrails.j
 import { ROOT, ADMIN, results, sec, ok, info, guard, sleep, until, testEnv, tempDb, prepareDb, startServer, stopServer, ident, uniqueEmail, api, loadPage, widget } from './lib.mjs';
 
 const PORT = 8790, DEV_PORT = 8791;
+const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null; // e.g. ONLY=widget,dashboard
+const want = (k) => !ONLY || ONLY.includes(k);
 const t0 = Date.now();
 async function randomMobile(prefix = '0917') { for (;;) { const n = prefix + String(Math.floor(Math.random() * 1e7)).padStart(7, '0'); if ((await validateContact(n, { checkDns: false })).ok) return n; } }
 
 // =====================================================================================
 sec('1. Rules (no AI, no server)');
-await guard('rules', async () => {
+if (want('rules')) await guard('rules', async () => {
   const good = [['0917 123 4583', 'mobile'], ['+63 917 555 0132', 'mobile'], ['viber: 0918 552 7731', 'viber'], ['WhatsApp +65 9123 4472', 'whatsapp'], ['wechat +86 138 1023 4471', 'wechat'],
     ['(02) 8365 0229', 'landline'], ['+1 415 555 0132', 'mobile'], ['mark.sagaad@dynamiqes.com', 'work_email'], ['juan.delacruz@gmail.com', 'email']];
   for (const [c, type] of good) { const r = await validateContact(c); ok(`contact accepted: ${c}`, r.ok && r.type === type, JSON.stringify(r)); }
@@ -66,7 +68,7 @@ ok('live AI mode (not mock)', health.mock === false, `${health.model} via ${heal
 
 // =====================================================================================
 sec('2. Onboarding API (name + contact required)');
-await guard('onboarding', async () => {
+if (want('onboarding')) await guard('onboarding', async () => {
   const id = ident();
   let r = await A.req('POST', '/api/session', { body: { ...A.person(), consent: undefined }, id });
   ok('no consent → refused', r.status === 400 && r.json.error === 'consent_required', r.text);
@@ -90,7 +92,7 @@ await guard('onboarding', async () => {
 // =====================================================================================
 sec('3. Chat (real AI)');
 let chatSession;
-await guard('chat', async () => {
+if (want('chat')) await guard('chat', async () => {
   const id = ident();
   chatSession = await A.session(id);
   let c = await A.chat(chatSession.token, 'Do you handle BIR CAS for a 40-person trading company?', id);
@@ -117,7 +119,7 @@ await guard('chat', async () => {
 
 // =====================================================================================
 sec('4. Rate limits');
-await guard('rate', async () => {
+if (want('rate')) await guard('rate', async () => {
   const id = ident(); const s = await A.session(id);
   let last;
   for (let i = 0; i < 31; i++) last = await A.chat(s.token, 'our SAP is not working, error on login', id);
@@ -127,7 +129,7 @@ await guard('rate', async () => {
 // =====================================================================================
 sec('5. Topic screen (keywords + small AI) and strikes');
 let strikeId, strikeSession, strikeEnd;
-await guard('screen', async () => {
+if (want('screen')) await guard('screen', async () => {
   for (const [m, offtopic] of [['marunong ka mag code?', true], ['can you talk Conyo', true], ['write me a poem about SAP', true], ['tara inom tayo mamaya', true],
     ['Hi', false], ['salamat po', false], ['Are you hiring SAP consultants?', false], ['What is IQ Barcode?', false]]) {
     const id = ident(); const s = await A.session(id); const c = await A.chat(s.token, m, id);
@@ -145,7 +147,7 @@ await guard('screen', async () => {
 
 // =====================================================================================
 sec('6. Ban after an ended chat');
-await guard('ban', async () => {
+if (want('ban')) await guard('ban', async () => {
   const hrs = (iso) => (new Date(iso) - Date.now()) / 3600e3;
   let b = (await A.req('GET', '/api/ban', { id: strikeId })).json;
   ok('same device banned ~24 h', b.banned && hrs(b.until) > 23.9 && hrs(b.until) <= 24, b.until);
@@ -168,7 +170,7 @@ await guard('ban', async () => {
 
 // =====================================================================================
 sec('7. Sessions and auth');
-await guard('auth', async () => {
+if (want('auth')) await guard('auth', async () => {
   const id = ident(); const s = await A.session(id);
   let r = await A.req('POST', '/api/session/resume', { body: { lang: 'en' }, token: s.token, id });
   ok('returning visitor resumes with a new conversation', r.status === 200 && r.json.session_id !== s.json.session_id);
@@ -184,7 +186,7 @@ await guard('auth', async () => {
 
 // =====================================================================================
 sec('8. Feedback, review queue, handoff, summary');
-await guard('feedback', async () => {
+if (want('feedback')) await guard('feedback', async () => {
   const id = ident(); const s = await A.session(id);
   const c = await A.chat(s.token, 'What is IQ Barcode?', id); const mid = c.done?.message_id;
   ok('answer received', !!c.done && Number.isInteger(mid));
@@ -204,7 +206,7 @@ await guard('feedback', async () => {
 
 // =====================================================================================
 sec('9. Approved answers and product notes');
-await guard('golden', async () => {
+if (want('golden')) await guard('golden', async () => {
   let r = await A.req('POST', '/api/admin/golden', { admin: true, body: { product: 'IQ People', question: 'Does IQ People compute night differential?', variations: 'Can your payroll compute night diff?\nKaya ba ng payroll ninyo ang night differential?', ideal_answer: 'Yes. **Night differential** is computed automatically for hours between 10 PM and 6 AM. More: https://dynamiqes.com/products/iq-people/' } });
   const gid = r.json?.id; ok('approved answer saved', r.status === 200 && !!gid);
   let m = (await A.req('POST', '/api/admin/match', { admin: true, body: { question: 'can your payroll compute night diff' } })).json;
@@ -234,7 +236,7 @@ await guard('golden', async () => {
 
 // =====================================================================================
 sec('10. Admin API');
-await guard('admin', async () => {
+if (want('admin')) await guard('admin', async () => {
   for (const p of ['/api/admin/overview', '/api/admin/leads', '/api/admin/golden']) ok(`${p} needs the admin token`, (await A.req('GET', p)).status === 401);
   for (const p of ['overview?days=7', 'activity', 'conversations', 'products', 'products/IQ%20People', 'golden', 'facts', 'glossary', 'prompt', 'status', 'leads', 'review-queue', 'feedback/summary', 'kb']) {
     const r = await A.req('GET', '/api/admin/' + p, { admin: true }); ok(`GET /api/admin/${p}`, r.status === 200 && r.json !== null, r.status);
@@ -268,8 +270,31 @@ await guard('admin', async () => {
   let r = await A.req('POST', '/api/admin/shutdown', { raw: false, body: {} });
   ok('remote shutdown without token refused', r.status === 403);
   r = await fetch(base + '/api/admin/shutdown', { method: 'POST', headers: { authorization: 'Bearer ' + ADMIN, 'cf-connecting-ip': '203.0.113.5' } });
-  ok('shutdown through the tunnel refused even with the token', r.status === 403);
+  ok('shutdown through the tunnel refused even with the token', r.status === 404 || r.status === 403, r.status);
   ok('backend still up after refused shutdowns', (await A.req('GET', '/api/health')).status === 200);
+});
+
+// =====================================================================================
+sec('10b. Access from the internet (through the tunnel)');
+if (want('access')) await guard('access', async () => {
+  const pub = { 'cf-connecting-ip': '203.0.113.77' };
+  let r = await fetch(base + '/admin/', { headers: pub }); ok('admin dashboard page hidden from the internet (404)', r.status === 404, r.status);
+  r = await fetch(base + '/api/admin/overview', { headers: { ...pub, authorization: 'Bearer ' + ADMIN } }); ok('admin API hidden from the internet even with the token (404)', r.status === 404, r.status);
+  r = await fetch(base + '/admin/'); ok('admin dashboard still works on this computer', r.status === 200, r.status);
+  const body = JSON.stringify({ name: 'Ana Reyes', contact: uniqueEmail('origin'), consent: { version: '2026-10-01', method: 'chip' } });
+  r = await fetch(base + '/api/session', { method: 'POST', headers: { ...pub, 'content-type': 'application/json' }, body }); ok('script without a website (no Origin) refused', r.status === 403, r.status);
+  r = await fetch(base + '/api/session', { method: 'POST', headers: { ...pub, 'content-type': 'application/json', origin: 'https://evil.example' }, body }); ok('another website refused', r.status === 403, r.status);
+  r = await fetch(base + '/api/session', { method: 'POST', headers: { ...pub, 'content-type': 'application/json', origin: 'https://stg-dynamiqescom-staging.kinsta.cloud' }, body }); ok('approved website (staging) allowed', r.status === 200, r.status);
+  r = await fetch(base + '/api/ban', { headers: { ...pub, origin: 'https://evil.example' } }); ok('widget check from another website refused → widget stays hidden', r.status === 403);
+  r = await fetch(base + '/api/ban', { method: 'OPTIONS', headers: { ...pub, origin: 'https://evil.example', 'access-control-request-method': 'GET' } });
+  ok('browser pre-check from another website gets no permission', !r.headers.get('access-control-allow-origin'));
+  r = await fetch(base + '/api/health', { headers: pub }); ok('health check stays public', r.status === 200);
+  r = await fetch(base + '/api/ingest/webhook', { method: 'POST', headers: { ...pub, 'content-type': 'application/json' }, body: '{}' }); ok('WordPress webhook not blocked by the website rule (own signature check: 401)', r.status === 401, r.status);
+  // the embed loader on an unapproved website: no widget
+  const evil = await loadPage(base, '/widget/embed-test.html', { beforeScripts: (w) => { w.fetch = (u, o = {}) => fetch(new URL(u, base), { ...o, headers: { ...(o.headers || {}), 'cf-connecting-ip': '203.0.113.78', origin: 'https://evil.example' } }); } });
+  await sleep(2500);
+  info('embed test page on an unapproved site', evil.$('#dq-chat .dq-chat__composer input') && !evil.$('script[src*="widget.js"]') ? 'markup present but widget not started' : (evil.$('script[src*="widget.js"]') ? 'widget started' : 'widget not mounted'));
+  evil.close();
 });
 
 // =====================================================================================
@@ -279,18 +304,29 @@ async function onboard(W, name, contact) {
   if (/updates/i.test(r)) await W.chip(/No thanks/);
   await W.waitIdle();
 }
-await guard('widget', async () => {
+if (want('widget')) await guard('widget', async () => {
   let W = await widget(base, { id: ident() });
-  ok('served by the backend: connects automatically, no "Demo mode"', !/Demo mode/.test(W.status()), W.status()); W.close();
+  ok('served by the backend: connects automatically, no "Demo mode"', !/Demo mode/.test(W.status()), W.status());
+  await W.open(); await until(() => W.$$('.dq-chat__chips button').length > 0, 6000);
+  ok('greeting topic buttons do NOT lock the text box', !W.input.disabled && W.$$('.dq-chat__chips button').length >= 4, W.input.placeholder); W.close();
+  W = await widget(base, { id: ident(), cfg: 'autoOpenMs: 1500' });
+  ok('chat closed at first', !W.$('#dqChatToggle').checked);
+  ok('chat pops open by itself after the delay, with the greeting', await until(() => W.$('#dqChatToggle').checked && W.bots().length >= 2, 6000), W.bots()[0]);
+  ok('auto-open does not grab focus (no keyboard pop-up on phones)', W.d.activeElement !== W.input);
+  W.close();
   W = await widget(base, { id: ident(), path: '/widget/index.html?api=mock' });
   ok('?api=mock: "Demo mode" shown in the header', /Demo mode/.test(W.status()), W.status()); W.close();
 
   const wid = ident();
-  W = await widget(base, { id: wid }); await W.open();
+  W = await widget(base, { id: wid, cfg: 'idleSurveyMs: 900000' }); await W.open(); // long flow: keep the idle survey from opening on its own
   let r = await W.say('Do you handle BIR CAS for a trading company?');
   ok('asks for consent before answering', /formality|Privacy Notice/i.test(W.bots().join(' ')));
-  r = await W.say('hello'); ok('typing without agreeing → asks again', /I agree/i.test(r));
+  ok('consent: text box locked until "I agree" is tapped', W.input.disabled && /Choose an option/i.test(W.input.placeholder), W.input.placeholder);
+  const before = W.bots().length; W.input.value = 'hello'; W.input.dispatchEvent(new W.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await sleep(400);
+  ok('consent: typed text is ignored while the choice is pending', W.bots().length === before);
+  await W.chip(/Read the Privacy Notice/); ok('consent: reading the notice keeps the lock', W.input.disabled);
   await W.chip(/I agree/);
+  ok('consent: unlocked after "I agree"', !W.input.disabled);
   ok('name step: placeholder + start-over heads-up', /name/i.test(W.input.placeholder) && /start over/i.test(W.bots().at(-1)), W.bots().at(-1));
   r = await W.say('asdf'); ok('fake name refused', /real name/i.test(r));
   r = await W.say("I'm Lea"); ok('"I\'m Lea" accepted, asks for contact (work email best)', /Nice to meet you, Lea/.test(r) && /work email/i.test(r), r);
@@ -303,6 +339,7 @@ await guard('widget', async () => {
   r = await W.say(gmail); ok('personal email → asks once for a work email', /work email/i.test(r) && W.$$('.dq-chat__chips button').some((b) => b.textContent.includes('Use ' + gmail)));
   const viber = await randomMobile('0918');
   r = await W.say('viber: ' + viber); ok('Viber number accepted → opt-in question', /updates/i.test(r), r);
+  ok('opt-in: text box locked until Yes / No is tapped', W.input.disabled && /Choose an option/i.test(W.input.placeholder), W.input.placeholder);
   const n0 = W.bots().length; let locked = false;
   const watch = setInterval(() => { if (W.input.disabled) locked = true; }, 10);
   W.$$('.dq-chat__chips button').reverse().find((b) => /No thanks/.test(b.textContent)).click();
@@ -313,9 +350,21 @@ await guard('widget', async () => {
   const stored = JSON.parse(W.w.localStorage.getItem('des:visitor') || '{}');
   ok('visitor stored with cleaned number + Viber label', stored.contact === '+63' + viber.slice(1) && stored.contact_type === 'viber', `${stored.contact} ${stored.contact_type}`);
   ok('AI answer formatted and has thumbs', W.$$('.dq-chat__rich').length > 0 && W.$$('.dq-chat__fb').length > 0);
+  // thumbs down → reasons are a required choice (with Skip)
+  W.$$('.dq-chat__fb button')[1].click(); await until(() => W.input.disabled && W.$$('.dq-chat__chips button').some((b) => /Skip/.test(b.textContent)), 8000);
+  ok('thumbs down: reasons shown with Skip, text box locked', W.input.disabled && /Choose an option/i.test(W.input.placeholder));
+  await W.chip(/Skip/); ok('thumbs down: Skip unlocks the text box', !W.input.disabled);
   W.input.value = 'What is IQ People?'; W.input.dispatchEvent(new W.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   ok('locks again on the next question', await until(() => W.input.disabled, 3000, 20), W.input.placeholder);
   await W.waitIdle();
+  // survey: rating and resolved are required choices; the comment step accepts typing
+  await W.say('thanks, bye');
+  ok('survey rating: text box locked', await until(() => W.input.disabled && W.$$('.dq-chat__chips.is-rating button').length === 5, 8000));
+  W.$$('.dq-chat__chips.is-rating').at(-1).querySelectorAll('button')[2].click(); await until(() => !W.input.disabled, 8000);
+  ok('survey low rating: comment step lets the visitor type', !W.input.disabled);
+  await W.chip(/Too technical/);
+  ok('survey "found what you needed?": text box locked', await until(() => W.input.disabled, 6000), 'ph=' + W.input.placeholder + ' busy=' + W.root?.className + ' last=' + W.bots().slice(-2).join(' || ').slice(-160) + ' events=' + W.w.DES.data.events.filter((e) => /error|survey/.test(e.type)).map((e) => e.type + (e.message ? ':' + e.message : '')).join(','));
+  await W.chip(/^\s*Yes/); ok('survey answered: text box unlocked', await until(() => !W.input.disabled, 6000));
   // session erased on the server mid-chat → recovers instead of erroring
   const conv = (await A.req('GET', '/api/admin/conversations?q=Lea&limit=5', { admin: true })).json[0];
   const det = (await A.req('GET', `/api/admin/conversations/${conv.id}/detail`, { admin: true })).json;
@@ -347,7 +396,7 @@ await guard('widget', async () => {
 
 // =====================================================================================
 sec('12. Admin dashboard (simulated browser)');
-await guard('dashboard', async () => {
+if (want('dashboard')) await guard('dashboard', async () => {
   const P = await loadPage(base, '/admin/', { storage: { des_admin_token: ADMIN } });
   const toasts = []; new P.w.MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((x) => { if (x.classList?.contains('toast')) toasts.push((x.classList.contains('is-bad') ? 'BAD ' : '') + x.textContent); }))).observe(P.d.body, { childList: true });
   ok('signs in with the admin token', await until(() => !P.$('#app').hidden, 8000));
@@ -378,7 +427,7 @@ await guard('dashboard', async () => {
 
 // =====================================================================================
 sec('13. Database safety and operations');
-await guard('ops', async () => {
+if (want('ops')) await guard('ops', async () => {
   const backups = `${dbDir}-backups`;
   ok('snapshot taken at startup', fs.existsSync(backups) && fs.readdirSync(backups).some((f) => f.endsWith('-start.tar.gz')));
   const before = fs.readdirSync(backups).filter((f) => f.endsWith('-stop.tar.gz')).length;

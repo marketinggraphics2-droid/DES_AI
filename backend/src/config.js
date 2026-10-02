@@ -11,6 +11,8 @@ export const cfg = {
   allowedOrigins: [...list(process.env.ALLOWED_ORIGINS), ...list(process.env.WEBSITE_URL).map((u) => new URL(u).origin)],
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
   adminToken: process.env.ADMIN_TOKEN || '',
+  // admin dashboard + admin API answer only on this computer (localhost); add public IPs here to allow remote admins
+  adminAllowedIps: list(process.env.ADMIN_ALLOWED_IPS),
   databaseUrl: process.env.DATABASE_URL || 'postgres://des:des@localhost:5433/des',
 
   // IQGateway (OpenAI-compatible). The key is bound to one client + one product wallet.

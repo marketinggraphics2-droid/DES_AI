@@ -11,6 +11,7 @@
     consentVersion: '2026-10-01',
     rememberDays: 30,
     idleSurveyMs: 3 * 60 * 1000,      // 3 min (demo page can override via window.DES_CFG)
+    autoOpenMs: 3000,                 // open the chat by itself 3 s after the page loads, once per browser session (0 = off)
     onboardTimeoutMs: 5 * 60 * 1000,  // no name / contact for 5 min during onboarding -> chat starts over (warning 1 min before)
     typingMs: [350, 700],
     askMarketingOptIn: true,
@@ -46,7 +47,7 @@
       workEmailAsk: (e) => `Thanks! Do you have a <b>work email</b>? It helps our team prepare for your business. Or continue with ${e}.`,
       useThis: (e) => `Use ${e}`,
       tooMany: `We've had several chats from this device or contact today. Please reach us directly at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
-      phName: 'Type your name…', phContact: 'Work email or mobile number…', phMsg: 'Type your message…', replying: 'DES is replying…', chatEnded: 'This chat has ended',
+      phName: 'Type your name…', phContact: 'Work email or mobile number…', phMsg: 'Type your message…', replying: 'DES is replying…', chatEnded: 'This chat has ended', pickOption: 'Choose an option above…', skip: 'Skip',
       until: 'until',
       endedNotice: (u) => `This chat was ended because it went off-topic${u ? `, and is paused until <b>${u}</b>` : ''}. For questions about DynamIQ, our team is at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
       optIn: 'Would you also like occasional updates on DynamIQ products and events?',
@@ -95,7 +96,7 @@
       workEmailAsk: (e) => `Salamat! May <b>work email</b> ka ba? Mas makakapaghanda ang team para sa negosyo mo. O magpatuloy gamit ang ${e}.`,
       useThis: (e) => `Gamitin ang ${e}`,
       tooMany: `Marami nang chat mula sa device o contact na ito ngayong araw. Kontakin kami sa <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> o <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
-      phName: 'I-type ang pangalan mo…', phContact: 'Work email o mobile number…', phMsg: 'Mag-type ng mensahe…', replying: 'Sumasagot si DES…', chatEnded: 'Tapos na ang chat na ito',
+      phName: 'I-type ang pangalan mo…', phContact: 'Work email o mobile number…', phMsg: 'Mag-type ng mensahe…', replying: 'Sumasagot si DES…', chatEnded: 'Tapos na ang chat na ito', pickOption: 'Pumili sa mga opsyon sa itaas…', skip: 'Laktawan',
       until: 'hanggang',
       endedNotice: (u) => `Tinapos ang chat na ito dahil napunta sa ibang usapan${u ? `, at naka-pause hanggang <b>${u}</b>` : ''}. Para sa tanong tungkol sa DynamIQ, nandito ang team namin: <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> o <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
       optIn: 'Gusto mo rin bang makatanggap ng updates tungkol sa DynamIQ products at events?',
@@ -335,7 +336,7 @@
   input.disabled = false; sendBtn.disabled = false;
   input.placeholder = 'Type your message…';
   function updatePlaceholder() {
-    if (S.busy) return;
+    if (S.busy || S.awaitChoice) return;
     input.placeholder = S.step === 'name' ? S.t.phName : S.step === 'contact' ? S.t.phContact : S.t.phMsg;
     input.setAttribute('inputmode', S.step === 'contact' ? 'email' : 'text');
     input.setAttribute('autocomplete', S.step === 'name' ? 'name' : S.step === 'contact' ? 'email' : 'off');
@@ -349,7 +350,7 @@
   function endChat(until) {
     const u = until || store.get('endedUntil', null) || new Date(Date.now() + 24 * 3600e3).toISOString();
     store.set('endedUntil', u);
-    S.ended = true; S.busy = false; input.disabled = true; sendBtn.disabled = true;
+    S.ended = true; S.busy = false; S.awaitChoice = false; input.disabled = true; sendBtn.disabled = true;
     input.placeholder = S.t.chatEnded + (untilText(u) ? ` · ${S.t.until} ${untilText(u)}` : '');
     root.classList.remove('is-busy'); root.classList.add('is-ended');
     emit('ended', { until: u });
@@ -358,11 +359,24 @@
   /** Lock the text box and send button while DES is thinking / replying. */
   function setBusy(on) {
     if (S.ended) return endChat();
-    S.busy = on; input.disabled = on; sendBtn.disabled = on;
-    root.classList.toggle('is-busy', on);
-    if (on) { input.placeholder = S.t.replying; input.setAttribute('aria-busy', 'true'); }
-    else { input.removeAttribute('aria-busy'); updatePlaceholder(); if (toggle && toggle.checked) input.focus(); }
+    S.busy = on;
+    if (on) input.setAttribute('aria-busy', 'true'); else input.removeAttribute('aria-busy');
+    applyComposer();
+    if (!on && !S.awaitChoice && toggle && toggle.checked) input.focus();
   }
+  /** Text box is locked while DES replies (busy), while a required choice is on screen (awaitChoice), or after the chat ended. */
+  function applyComposer() {
+    if (S.ended) return;
+    const locked = !!(S.busy || S.awaitChoice);
+    input.disabled = locked; sendBtn.disabled = locked;
+    root.classList.toggle('is-busy', !!S.busy);
+    root.classList.toggle('is-choosing', !!S.awaitChoice && !S.busy);
+    if (S.busy) input.placeholder = S.t.replying;
+    else if (S.awaitChoice) input.placeholder = S.t.pickOption;
+    else updatePlaceholder();
+  }
+  function lockForChoice() { S.awaitChoice = true; applyComposer(); }
+  function unlockChoice() { S.awaitChoice = false; applyComposer(); if (!S.busy && !S.ended && toggle && toggle.checked) setTimeout(() => input.focus(), 50); }
   note.innerHTML = `By chatting you agree to our <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Privacy Notice</a>`;
   body.innerHTML = ''; // drop the static mockup thread
   body.append(el('p', 'dq-chat__day', 'Today'));
@@ -390,7 +404,8 @@
     if (on && !typingEl) { typingEl = el('div', 'dq-chat__msg is-bot is-typing', `${mini()}<div class="dq-chat__bubble"><span></span><span></span><span></span></div>`); body.append(typingEl); scroll(); await sleep(rnd(CFG.typingMs)); }
     if (!on && typingEl) { typingEl.remove(); typingEl = null; }
   }
-  /** bot bubble. opts: {chips:[{label,cls,on}], chipsCls, notice, time, feedback:bool, id} */
+  /** bot bubble. opts: {chips:[{label,cls,on,keepLock}], chipsCls, lock, notice, time, feedback:bool, id}
+   *  lock: a required choice — the text box stays locked until one of these buttons is picked (keepLock buttons don't unlock). */
   async function addBot(html, opts = {}) {
     await typing(true); await typing(false);
     const m = el('div', 'dq-chat__msg is-bot');
@@ -399,12 +414,13 @@
     if (opts.chips) {
       const c = el('div', 'dq-chat__chips' + (opts.chipsCls ? ' ' + opts.chipsCls : ''));
       c.setAttribute('aria-label', 'Options');
-      opts.chips.forEach(ch => { const bt = el('button', ch.cls || null, ch.label); bt.type = 'button'; bt.onclick = () => { if (c.classList.contains('is-done')) return; c.classList.add('is-done'); bt.classList.add('is-picked'); ch.on && ch.on(ch.label, bt); }; c.append(bt); });
+      opts.chips.forEach(ch => { const bt = el('button', ch.cls || null, ch.label); bt.type = 'button'; bt.onclick = () => { if (c.classList.contains('is-done')) return; c.classList.add('is-done'); bt.classList.add('is-picked'); if (opts.lock && !ch.keepLock) unlockChoice(); ch.on && ch.on(ch.label, bt); }; c.append(bt); });
       b.append(c);
     }
     m.innerHTML = mini(); m.append(b);
     if (opts.feedback) attachThumbs(m, b, opts.id);
     body.append(m); scroll();
+    if (opts.lock && opts.chips) lockForChoice();
     data.conversation.messages.push({ role: 'assistant', id: opts.id || null, text: b.textContent.trim(), at: new Date().toISOString(), scripted: !opts.feedback });
     return m;
   }
@@ -430,9 +446,9 @@
   async function startOnboarding(firstMsg) {
     S.held = firstMsg; S.step = 'consent'; armOnboardTimer();
     const t = S.t;
-    await addBot(t.intro, { chips: [{ label: t.agree, cls: 'is-primary', on: consentGiven }, { label: t.readNotice, cls: 'is-quiet', on: async (_, bt) => { bt.closest('.dq-chat__chips').classList.remove('is-done'); bt.classList.remove('is-picked'); await showNotice(); } }] });
+    await addBot(t.intro, { lock: true, chips: [{ label: t.agree, cls: 'is-primary', on: consentGiven }, { label: t.readNotice, cls: 'is-quiet', keepLock: true, on: async (_, bt) => { bt.closest('.dq-chat__chips').classList.remove('is-done'); bt.classList.remove('is-picked'); await showNotice(); } }] });
   }
-  async function showNotice() { await addBot(NOTICE, { notice: true, time: false }); if (S.step === 'consent') await addBot(`${S.t.notYet}`, { chips: [{ label: S.t.agree, cls: 'is-primary', on: consentGiven }] }); }
+  async function showNotice() { await addBot(NOTICE, { notice: true, time: false }); if (S.step === 'consent') await addBot(`${S.t.notYet}`, { lock: true, chips: [{ label: S.t.agree, cls: 'is-primary', on: consentGiven }] }); }
   async function consentGiven(method) {
     if (S.step !== 'consent') return;
     S.consent = { at: new Date().toISOString(), version: CFG.consentVersion, method: /^typed:/.test(method || '') ? method : 'chip', lang: S.lang };
@@ -442,7 +458,7 @@
   async function onboardingInput(text) {
     const t = S.t;
     armOnboardTimer(); // any reply restarts the 5-minute window
-    if (S.step === 'consent') { if (AFFIRM.test(text.trim())) return consentGiven('typed:' + text.trim().toLowerCase()); return addBot(t.notYet, { chips: [{ label: t.agree, cls: 'is-primary', on: consentGiven }] }); }
+    if (S.step === 'consent') { if (AFFIRM.test(text.trim())) return consentGiven('typed:' + text.trim().toLowerCase()); return addBot(t.notYet, { lock: true, chips: [{ label: t.agree, cls: 'is-primary', on: consentGiven }] }); }
     if (S.step === 'name') {
       const v = text.trim();
       if (/\?|\b(how|what|magkano|paano|ano|price|do you)\b/i.test(v) && v.split(' ').length > 3) return addBot(t.nameFirst);
@@ -473,7 +489,7 @@
     if (!contact || !contact.value) return contactProblem('contact_required');
     if (S.step !== 'contact') return; // chip tapped twice
     data.visitor = { name: S.tmpName, first: S.tmpName.split(' ')[0], contact: contact?.value || null, contact_type: contact?.type || null, consent: S.consent, marketing_opt_in: false, page_url: location.href, created_at: new Date().toISOString() };
-    if (CFG.askMarketingOptIn) { S.step = 'optin'; armOnboardTimer(); return addBot(S.t.optIn, { chips: [{ label: S.t.optYes, cls: 'is-primary', on: () => finishOptIn(true) }, { label: S.t.optNo, cls: 'is-quiet', on: () => finishOptIn(false) }], chipsCls: 'is-inline' }); }
+    if (CFG.askMarketingOptIn) { S.step = 'optin'; armOnboardTimer(); return addBot(S.t.optIn, { lock: true, chips: [{ label: S.t.optYes, cls: 'is-primary', on: () => finishOptIn(true) }, { label: S.t.optNo, cls: 'is-quiet', on: () => finishOptIn(false) }], chipsCls: 'is-inline' }); }
     return finishOptIn(false);
   }
   async function finishOptIn(yes) {
@@ -529,7 +545,7 @@
     finally { setBusy(false); input.focus(); }
   }
   async function trouble(reason) {
-    await addBot(S.t.trouble, { chips: [{ label: S.t.connect, cls: 'is-primary', on: () => handoff('system', reason) }, { label: S.t.keep, cls: 'is-quiet', on: () => { } }] });
+    await addBot(S.t.trouble, { lock: true, chips: [{ label: S.t.connect, cls: 'is-primary', on: () => handoff('system', reason) }, { label: S.t.keep, cls: 'is-quiet', on: () => { } }] });
   }
   async function handoff(kind, reason) {
     await api.handoff(reason ? `${kind}: ${reason}` : kind);
@@ -543,8 +559,8 @@
     S.surveyOpen = true; clearTimeout(S.idleTimer); emit('survey.open', { trigger });
     const t = S.t, fb = { kind: 'survey', trigger };
     await addBot(t.surveyIntro, { time: false });
-    await addBot(t.surveyQ, { chipsCls: 'is-rating', chips: [1, 2, 3, 4, 5].map(n => ({ label: String(n), on: () => rated(n) })) });
-    const tail = await addBot('', { time: false, chips: [{ label: t.notNow, cls: 'is-quiet', on: () => { S.surveyOpen = false; S.surveyDone = true; api.feedback({ ...fb, rating: null, dismissed: true }); closeIfRequested(); } }, { label: t.connect, on: () => { S.surveyOpen = false; S.surveyDone = true; handoff('survey'); } }], chipsCls: 'is-inline' });
+    await addBot(t.surveyQ, { lock: true, chipsCls: 'is-rating', chips: [1, 2, 3, 4, 5].map(n => ({ label: String(n), on: () => rated(n) })) });
+    const tail = await addBot('', { time: false, lock: true, chips: [{ label: t.notNow, cls: 'is-quiet', on: () => { S.surveyOpen = false; S.surveyDone = true; api.feedback({ ...fb, rating: null, dismissed: true }); closeIfRequested(); } }, { label: t.connect, on: () => { S.surveyOpen = false; S.surveyDone = true; handoff('survey'); } }], chipsCls: 'is-inline' });
     tail.querySelector('.dq-chat__bubble').style.paddingTop = '6px';
     async function rated(n) {
       fb.rating = n; tail.querySelector('.dq-chat__chips').classList.add('is-done');
@@ -553,7 +569,7 @@
     }
     async function reasoned(reasons, comment) {
       S.pending = null; fb.reasons = reasons; if (comment) fb.comment = comment.replace(PII, '[redacted]').slice(0, 300);
-      await addBot(t.resolvedQ, { chipsCls: 'is-inline', chips: t.resolved.map((r, i) => ({ label: r, on: () => resolved(['yes', 'partly', 'no'][i]) })) });
+      await addBot(t.resolvedQ, { lock: true, chipsCls: 'is-inline', chips: t.resolved.map((r, i) => ({ label: r, on: () => resolved(['yes', 'partly', 'no'][i]) })) });
     }
     async function resolved(v) {
       fb.resolved = v; S.surveyDone = true; S.surveyOpen = false; api.feedback(fb); api.end?.();
@@ -561,7 +577,7 @@
     }
   }
   async function askReasons(id) {
-    await addBot(S.t.thumbsDownQ, { chips: S.t.reasons.map(r => ({ label: r, on: (l) => { api.feedback({ kind: 'thumb_reason', message_id: id, reasons: [l] }); addBot(S.t.noted, { time: false }); } })) });
+    await addBot(S.t.thumbsDownQ, { lock: true, chips: [...S.t.reasons.map(r => ({ label: r, on: (l) => { api.feedback({ kind: 'thumb_reason', message_id: id, reasons: [l] }); addBot(S.t.noted, { time: false }); } })), { label: S.t.skip, cls: 'is-quiet', on: () => { } }] });
   }
   function armIdle() { clearTimeout(S.idleTimer); if (!S.surveyDone) S.idleTimer = setTimeout(() => survey('idle'), CFG.idleSurveyMs); }
   let closeRequested = false;
@@ -572,7 +588,7 @@
 
   // ---------- input ----------
   async function send(raw) {
-    const text = (raw ?? input.value).trim(); if (!text || S.busy) return;
+    const text = (raw ?? input.value).trim(); if (!text || S.busy || S.ended || (S.awaitChoice && raw == null)) return; // typed text waits for the required choice
     input.value = '';
     if (S.step === 'idle') setLang(isFil(text) ? 'fil' : 'en');
     if (PII.test(text) && S.step === 'done') { addUser(text.replace(PII, '[redacted]')); await addBot("Please don't share card, TIN or ID numbers here — I've hidden it. How else can I help?"); return; }
@@ -589,7 +605,7 @@
   async function reset(opts = {}) {
     clearOnboardTimer();
     if (banActive()) { addBot(S.t.endedNotice(untilText(banActive())), { time: false }); return endChat(banActive()); }
-    store.del('visitor'); data.visitor = null; S.step = 'idle'; S.held = null; S.ended = false; root.classList.remove('is-ended'); input.disabled = false; sendBtn.disabled = false; S.surveyDone = false; S.surveyOpen = false; S.botAnswers = 0; S.contactTries = 0; S.askedWorkEmail = false; S.pendingEmail = null;
+    store.del('visitor'); data.visitor = null; S.step = 'idle'; S.held = null; S.ended = false; S.awaitChoice = false; root.classList.remove('is-ended'); input.disabled = false; sendBtn.disabled = false; S.surveyDone = false; S.surveyOpen = false; S.botAnswers = 0; S.contactTries = 0; S.askedWorkEmail = false; S.pendingEmail = null;
     updatePlaceholder();
     body.innerHTML = ''; body.append(el('p', 'dq-chat__day', 'Today')); setStatus(); emit('reset', {});
     if (opts.notice) await addBot(opts.notice, { time: false });
@@ -620,8 +636,21 @@
   }
   setStatus();
   let greeted = false;
-  toggle.addEventListener('change', () => { if (toggle.checked && !greeted) { greeted = true; greet(); } if (toggle.checked) setTimeout(() => input.focus(), 400); });
+  let autoOpening = false;
+  toggle.addEventListener('change', () => { if (toggle.checked && !greeted) { greeted = true; greet(); } if (toggle.checked && !autoOpening) setTimeout(() => input.focus(), 400); autoOpening = false; });
   if (toggle.checked) { greeted = true; greet(); }
+  // pop the chat open after CFG.autoOpenMs, once per browser session; never over a visitor who closed it, never while paused
+  const ssGet = (k) => { try { return sessionStorage.getItem('des:' + k); } catch { return null; } };
+  const ssSet = (k, v) => { try { sessionStorage.setItem('des:' + k, v); } catch { } };
+  if (CFG.autoOpenMs > 0 && !toggle.checked && !ssGet('autoOpened') && !banActive()) {
+    setTimeout(() => {
+      if (toggle.checked || ssGet('autoOpened')) return;
+      ssSet('autoOpened', '1'); autoOpening = true; // no keyboard pop-up on phones when it opens by itself
+      toggle.checked = true; toggle.dispatchEvent(new Event('change'));
+      emit('auto_open', {});
+    }, CFG.autoOpenMs);
+  }
+  toggle.addEventListener('change', () => ssSet('autoOpened', '1')); // opened or closed by hand: don't auto-open again this session
   window.DES = { data, send, survey: () => survey('manual'), reset, trouble: () => trouble('manual') };
   emit('boot', {});
 })();

@@ -658,7 +658,7 @@
   // ---------------- settings ----------------
   async function pageSettings() {
     loading();
-    let facts, gloss, prompt; try { [facts, gloss, prompt] = await Promise.all([api('/admin/facts'), api('/admin/glossary'), api('/admin/prompt')]); } catch (e) { return fail(e); }
+    let facts, gloss, prompt, bans; try { [facts, gloss, prompt, bans] = await Promise.all([api('/admin/facts'), api('/admin/glossary'), api('/admin/prompt'), api('/admin/bans')]); } catch (e) { return fail(e); }
     const s = state.status;
     const factRow = (f = { key: '', value: '' }, isNew = false) => {
       const key = h('input', { class: 'input mono', value: f.key, placeholder: 'key_name', readOnly: !isNew, 'aria-label': 'Fact name' });
@@ -690,6 +690,15 @@
           h('dt', { text: 'Answer matching' }), h('dd', { text: `An approved answer is used when the match score is at least ${Math.round(s.golden_min_score * 100)}% (GOLDEN_MIN_SCORE).` }),
           h('dt', { text: 'Daily AI budget' }), h('dd', { text: usd(s.daily_budget_usd) + ' (DAILY_BUDGET_USD)' }),
         ))),
+        h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Bans after ended chats' }),
+            h('p', { text: 'When DES ends a chat for repeated off-topic or abusive messages, that device, contact and visitor are paused for 24 h and the connection for 1 h.' })),
+          h('button', { class: 'btn btn--danger', type: 'button', disabled: !bans.active, text: 'Lift all bans', on: { click: async () => {
+            if (!confirm('Lift every active ban now? Banned visitors can start a new chat straight away.')) return;
+            try { const r = await api('/admin/bans', { method: 'DELETE' }); toast(`Lifted (${r.lifted} ban records removed)`); pageSettings(); } catch (e) { fail(e); }
+          } } })),
+          h('div', { class: 'card__body' }, bans.active
+            ? h('p', { style: { margin: 0 }, text: `${n(bans.active)} active ban${bans.active === 1 ? '' : 's'} (${Object.entries(bans.by_kind).map(([k, v]) => `${v} ${({ ip: 'connection', device: 'device', visitor: 'visitor', contact: 'contact' })[k] || k}`).join(', ')}) from ${n(bans.ended_chats)} ended chat${bans.ended_chats === 1 ? '' : 's'}. Latest ends ${when(bans.bans.map((b) => b.until).sort().at(-1))}.` })
+            : h('p', { class: 'muted', style: { margin: 0 }, text: 'No active bans.' }))),
         h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Company facts' }), h('p', { text: 'Sent to DES with every message. Keep them short and exact.' })),
           h('button', { class: 'btn btn--sm', type: 'button', text: '+ Add fact', on: { click: () => { factBody.append(factRow(undefined, true)); factBody.lastElementChild.querySelector('input').focus(); } } })),
           h('div', { class: 'table-wrap' }, h('table', null, factBody))),

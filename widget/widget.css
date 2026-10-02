@@ -71,3 +71,6 @@
 .dq-chat__rich ul, .dq-chat__rich ol { margin: 0 0 .55em; padding-left: 1.2em; }
 .dq-chat__rich li { margin: .15em 0; }
 .dq-chat__rich a { color: inherit; text-decoration: underline; text-underline-offset: 2px; word-break: break-word; }
+/* composer locked until a required button is picked */
+.dq-chat.is-choosing .dq-chat__composer input:disabled{cursor:not-allowed}
+.dq-chat.is-choosing .dq-chat__msg:last-of-type .dq-chat__chips:not(.is-done) button{box-shadow:0 0 0 2px rgba(var(--rgb-brand),.35)}

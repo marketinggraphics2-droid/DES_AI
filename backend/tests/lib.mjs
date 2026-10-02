@@ -31,6 +31,7 @@ export function testEnv(port, dbDir, extra = {}) {
   return {
     ...process.env, PORT: String(port), DATABASE_URL: 'pglite:' + dbDir, ADMIN_TOKEN: ADMIN,
     TURNSTILE_SECRET: '', SMTP_HOST: '', PUBLIC_URL: '', WEBSITE_URL: '',
+    ALLOWED_ORIGINS: [process.env.ALLOWED_ORIGINS, 'http://localhost:' + port].filter(Boolean).join(','), // the test backend's own pages count as an approved site
     RATE_SESSIONS_PER_IP_DAY: '1000', RATE_SESSIONS_PER_CONTACT_DAY: '3', RATE_MSG_PER_10MIN: '30', ...extra,
   };
 }
@@ -66,7 +67,7 @@ export const uniqueEmail = (tag = 'qa') => `${tag}.t${Date.now().toString(36)}${
 export function api(base) {
   const headers = (id, token, admin) => ({
     'content-type': 'application/json',
-    ...(id ? { 'cf-connecting-ip': id.ip, 'x-des-device': id.dev } : {}),
+    ...(id ? { 'cf-connecting-ip': id.ip, 'x-des-device': id.dev, origin: base } : {}),
     ...(token ? { authorization: 'Bearer ' + token } : {}), ...(admin ? { authorization: 'Bearer ' + ADMIN } : {}),
   });
   async function req(method, p, { body, id, token, admin, raw } = {}) {
@@ -89,14 +90,14 @@ export function api(base) {
 // ---------------- jsdom (widget / dashboard) ----------------
 export async function loadPage(base, pagePath, { id, cfg = '', storage = {}, beforeScripts } = {}) {
   let html = await (await fetch(base + pagePath.split('?')[0])).text();
-  html = html.replace('window.DES_CFG = { idleSurveyMs: 90 * 1000 };', `window.DES_CFG = { idleSurveyMs: 90 * 1000, typingMs: [0, 0]${cfg ? ', ' + cfg : ''} };`);
+  html = html.replace('window.DES_CFG = { idleSurveyMs: 90 * 1000 };', `window.DES_CFG = { idleSurveyMs: 90 * 1000, typingMs: [0, 0], autoOpenMs: 0${cfg ? ', ' + cfg : ''} };`);
   const errors = [];
   const vc = new VirtualConsole();
   vc.on('jsdomError', (e) => { if (!/Could not load link|stylesheet|fonts\.googleapis|Could not parse CSS/i.test(e.message)) errors.push((e.detail?.stack || e.message).slice(0, 300)); });
   const dom = new JSDOM(html, {
     url: base + pagePath, runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true, virtualConsole: vc,
     beforeParse(w) {
-      w.fetch = (u, o = {}) => fetch(new URL(u, base), { ...o, headers: { ...(o.headers || {}), ...(id ? { 'cf-connecting-ip': id.ip } : {}) } });
+      w.fetch = (u, o = {}) => fetch(new URL(u, base), { ...o, headers: { ...(o.headers || {}), ...(id ? { 'cf-connecting-ip': id.ip, origin: base } : {}) } });
       w.TextDecoder = TextDecoder; w.TextEncoder = TextEncoder;
       w.ResizeObserver = class { observe() { } disconnect() { } };
       w.scrollTo = () => { }; w.Element.prototype.scrollTo = () => { }; w.HTMLElement.prototype.scrollIntoView = () => { };
@@ -122,7 +123,8 @@ export async function widget(base, opts = {}) {
   const settle = async (n) => { await until(() => bots().length > n, 15000); let last = bots().length; for (let i = 0; i < 20; i++) { await sleep(150); if (bots().length === last && i > 4) break; last = bots().length; } };
   const open = async () => { const t = p.$('#dqChatToggle'); if (!t.checked) { t.checked = true; t.dispatchEvent(new p.w.Event('change')); } await sleep(700); };
   const say = async (text) => { const n0 = bots().length; input.value = text; input.dispatchEvent(new p.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await settle(n0); return bots().at(-1) || ''; };
-  const chip = async (re) => { const n0 = bots().length; const b = p.$$('.dq-chat__chips button').reverse().find((x) => re.test(x.textContent)); if (!b) return false; b.click(); await settle(n0); return true; };
+  // only buttons whose choice is still open; waits briefly for them to appear
+  const chip = async (re) => { const n0 = bots().length; const find = () => p.$$('.dq-chat__chips:not(.is-done) button').reverse().find((x) => re.test(x.textContent)); await until(find, 6000, 50); const b = find(); if (!b) return false; b.click(); await settle(n0); return true; };
   const waitIdle = (ms = 40000) => until(() => !input.disabled || /ended|Tapos/i.test(input.placeholder), ms, 50);
   return { ...p, input, bots, say, chip, open, waitIdle, status: () => p.$('.dq-chat__status')?.textContent.trim() || '' };
 }

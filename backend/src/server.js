@@ -12,6 +12,27 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(cors({ origin: (o, cb) => cb(null, !o || cfg.allowedOrigins.length === 0 || cfg.allowedOrigins.includes(o)), credentials: false }));
 app.use(express.json({ limit: '32kb' }));
+
+// ---- access gates ----
+// "Proxied" = arrived through the Cloudflare tunnel / a proxy (they add these headers); direct = this computer.
+const isProxied = (req) => !!(req.headers['cf-connecting-ip'] || req.headers['cf-ray'] || req.headers['x-forwarded-for']);
+const isLocal = (req) => !isProxied(req) && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+const clientIp = (req) => String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+// 1) Admin dashboard + admin API: only on this computer (or ADMIN_ALLOWED_IPS). Everyone else gets a plain 404.
+app.use(['/admin', '/api/admin'], (req, res, next) => {
+  if (isLocal(req) || cfg.adminAllowedIps.includes(clientIp(req))) return next();
+  res.status(404).type('text/plain').send('Not found');
+});
+// 2) Public chat API through the tunnel: only from the approved websites (ALLOWED_ORIGINS / WEBSITE_URL).
+//    Stops other sites and scripts from using the bot (and the AI credits). Local calls (dev, tests) are allowed.
+//    /health is harmless; the WordPress webhook is server-to-server and checks its own HMAC signature.
+const OPEN_PATHS = ['/health', '/ingest/webhook'];
+app.use('/api', (req, res, next) => {
+  if (req.method === 'OPTIONS' || OPEN_PATHS.includes(req.path) || req.path.startsWith('/admin') || !isProxied(req)) return next();
+  const origin = req.headers.origin;
+  if (origin && cfg.allowedOrigins.includes(origin)) return next();
+  res.status(403).json({ error: 'origin_not_allowed' });
+});
 app.use((req, _res, next) => { req.ip_raw = req.ip; next(); });
 app.use('/api', r);
 // npm run stop: admin token + only from this computer (not through the tunnel, which adds Cloudflare headers)

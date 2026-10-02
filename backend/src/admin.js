@@ -290,3 +290,20 @@ adminRouter.post('/match', wrap(async (req, res) => {
   const all = await goldenMatches(question, { product, k: 10 });
   res.json({ product: product || GENERAL, min_score: cfg.goldenMinScore, matches: all.map((a) => ({ id: Number(a.id), question: a.question, matched: a.matched, score: a.sim })) });
 }));
+
+// ---------------- bans after ended chats ----------------
+const banKind = (b) => b.split(':')[0]; // ip | device | visitor | contact
+adminRouter.get('/bans', wrap(async (_req, res) => {
+  const hours = Math.max(cfg.chatBanHours, cfg.chatBanIpHours);
+  const rows = (await q(`select bucket, max(at) last from rate_events where kind='ended' and at > now() - make_interval(hours => $1) group by bucket order by 2 desc`, [hours])).rows;
+  const active = rows.map((r) => {
+    const h = banKind(r.bucket) === 'ip' ? cfg.chatBanIpHours : cfg.chatBanHours;
+    return { kind: banKind(r.bucket), at: r.last, until: new Date(new Date(r.last).getTime() + h * 3600e3).toISOString() };
+  }).filter((b) => new Date(b.until) > new Date());
+  const ended = (await q(`select count(*)::int n from conversations where status='ended' and ended_at > now() - make_interval(hours => $1)`, [hours])).rows[0].n;
+  res.json({ active: active.length, by_kind: active.reduce((m, b) => ({ ...m, [b.kind]: (m[b.kind] || 0) + 1 }), {}), ended_chats: ended, bans: active });
+}));
+adminRouter.delete('/bans', wrap(async (_req, res) => {
+  const r = await q(`delete from rate_events where kind='ended'`);
+  res.json({ ok: true, lifted: r.rowCount });
+}));

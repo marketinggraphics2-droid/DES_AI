@@ -52,5 +52,16 @@
     css(base + 'widget.css' + v);
     const s = document.createElement('script'); s.src = base + 'widget.js' + v; document.body.append(s);
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  // Copying this script tag to another website does nothing: the backend only answers approved websites,
+  // so the widget checks first and stays hidden if this site isn't allowed.
+  async function start() {
+    if (ds.api) {
+      try {
+        const r = await fetch(ds.api.replace(/\/$/, '') + '/ban', { credentials: 'omit', cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+      } catch (e) { console.warn('[DES] chat not enabled for this website'); return; }
+    }
+    boot();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
