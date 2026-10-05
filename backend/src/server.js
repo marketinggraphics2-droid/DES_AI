@@ -5,12 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { cfg, isMock } from './config.js';
 import { r } from './routes.js';
 import { adminRouter, backfillGolden } from './admin.js';
+import { accessUser } from './access.js';
+import { loadSites, isAllowedOrigin, anySitesConfigured } from './sites.js';
 import { pool, exec } from './db.js';
 import fs from 'node:fs';
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(cors({ origin: (o, cb) => cb(null, !o || cfg.allowedOrigins.length === 0 || cfg.allowedOrigins.includes(o)), credentials: false }));
+app.use(cors({ origin: (o, cb) => cb(null, !o || !anySitesConfigured() || isAllowedOrigin(o)), credentials: false }));
 app.use(express.json({ limit: '32kb' }));
 
 // ---- access gates ----
@@ -18,9 +20,10 @@ app.use(express.json({ limit: '32kb' }));
 const isProxied = (req) => !!(req.headers['cf-connecting-ip'] || req.headers['cf-ray'] || req.headers['x-forwarded-for']);
 const isLocal = (req) => !isProxied(req) && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 const clientIp = (req) => String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-// 1) Admin dashboard + admin API: only on this computer (or ADMIN_ALLOWED_IPS). Everyone else gets a plain 404.
-app.use(['/admin', '/api/admin'], (req, res, next) => {
+// 1) Admin dashboard + admin API: only on this computer, ADMIN_ALLOWED_IPS, or a Cloudflare Access login. Everyone else gets a plain 404.
+app.use(['/admin', '/api/admin'], async (req, res, next) => {
   if (isLocal(req) || cfg.adminAllowedIps.includes(clientIp(req))) return next();
+  if (await accessUser(req)) return next();
   res.status(404).type('text/plain').send('Not found');
 });
 // 2) Public chat API through the tunnel: only from the approved websites (ALLOWED_ORIGINS / WEBSITE_URL).
@@ -30,7 +33,9 @@ const OPEN_PATHS = ['/health', '/ingest/webhook'];
 app.use('/api', (req, res, next) => {
   if (req.method === 'OPTIONS' || OPEN_PATHS.includes(req.path) || req.path.startsWith('/admin') || !isProxied(req)) return next();
   const origin = req.headers.origin;
-  if (origin && cfg.allowedOrigins.includes(origin)) return next();
+  if (isAllowedOrigin(origin)) return next();
+  // pages served by this backend (/widget/embed-test.html): browsers send no Origin on same-origin GETs
+  if (!origin && req.headers['sec-fetch-site'] === 'same-origin') return next();
   res.status(403).json({ error: 'origin_not_allowed' });
 });
 app.use((req, _res, next) => { req.ip_raw = req.ip; next(); });
@@ -53,6 +58,7 @@ app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ 
 // idempotent schema upgrade so new columns/tables exist without a manual migrate
 await exec(fs.readFileSync(fileURLToPath(new URL('../sql/schema.sql', import.meta.url)), 'utf8'));
 await backfillGolden().catch((e) => console.error('approved-answer backfill', e.message));
+await loadSites();
 
 const server = app.listen(cfg.port, () => {
   console.log(`DES API on :${cfg.port} · ${isMock() ? 'MOCK mode (no IQ_GATEWAY_KEY)' : 'IQGateway ' + cfg.gateway.url + ' · model ' + cfg.model} · embeddings ${cfg.embeddings.provider}`);

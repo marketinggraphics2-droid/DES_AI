@@ -9,6 +9,7 @@ import { PRODUCTS, detectProduct, search, glossaryHits, facts, goldenMatches, pr
 import { stablePrompt, buildContext } from './prompt.js';
 import { answer } from './llm.js';
 import { detectLang, filterOutput, CANNED } from './guardrails.js';
+import { loadSites, toOrigin } from './sites.js';
 
 export const adminRouter = Router();
 const GENERAL = 'General'; // approved answers / questions not tied to one product
@@ -312,4 +313,23 @@ adminRouter.get('/bans', wrap(async (_req, res) => {
 adminRouter.delete('/bans', wrap(async (_req, res) => {
   const r = await q(`delete from rate_events where kind='ended'`);
   res.json({ ok: true, lifted: r.rowCount });
+}));
+
+// ---------------- embed code + websites allowed to show the widget ----------------
+adminRouter.get('/sites', wrap(async (req, res) => {
+  const rows = (await q('select origin, note, added_at from allowed_sites order by added_at')).rows;
+  res.json({ base: cfg.publicUrl || `${req.protocol}://${req.get('host')}`, fixed: [...new Set(cfg.allowedOrigins)], sites: rows });
+}));
+adminRouter.post('/sites', wrap(async (req, res) => {
+  const origin = toOrigin(req.body?.origin);
+  if (!origin) return res.status(400).json({ error: 'Enter a full website address starting with https:// or http://' });
+  if (cfg.allowedOrigins.includes(origin)) return res.status(409).json({ error: 'That website is already allowed in the server settings' });
+  await q('insert into allowed_sites(origin, note) values($1, $2) on conflict (origin) do update set note=excluded.note', [origin, clean(req.body?.note, 120) || null]);
+  await loadSites();
+  res.json({ ok: true, origin });
+}));
+adminRouter.delete('/sites', wrap(async (req, res) => {
+  const r = await q('delete from allowed_sites where origin=$1', [String(req.query.origin || '')]);
+  await loadSites();
+  res.json({ ok: true, removed: r.rowCount });
 }));

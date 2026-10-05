@@ -19,12 +19,15 @@ services:
     environment:
       DATABASE_URL: postgres://des:des@db:5432/des
       WIDGET_DIR: /widget
+      SCRAPE_DIR: /kb
     ports: ["8787:8787"]
     depends_on:
       db: { condition: service_healthy }
     volumes:
       - ../reference/website-scrape-2026-10-01:/kb:ro
       - ../widget:/widget:ro
+      - ../admin:/admin:ro   # dashboard (src/server.js serves ../../admin)
+      - ../docs:/docs:ro     # system-instruction.md, the bot's persona and rules (src/prompt.js)
     command: sh -c "node scripts/migrate.js && node src/server.js"
 
 volumes:

@@ -199,3 +199,9 @@ create table if not exists product_notes (        -- extra facts / instructions 
 alter table messages add column if not exists product text;        -- product detected in the visitor message
 alter table messages add column if not exists golden_ids bigint[];  -- approved answers supplied for this reply
 create index if not exists messages_created_idx on messages(created_at);
+
+create table if not exists allowed_sites (        -- websites added in the dashboard that may show the widget (on top of ALLOWED_ORIGINS)
+  origin text primary key,
+  note text,
+  added_at timestamptz default now()
+);

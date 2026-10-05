@@ -13,6 +13,11 @@ export const cfg = {
   adminToken: process.env.ADMIN_TOKEN || '',
   // admin dashboard + admin API answer only on this computer (localhost); add public IPs here to allow remote admins
   adminAllowedIps: list(process.env.ADMIN_ALLOWED_IPS),
+  // ...or anyone signed in through Cloudflare Access (Zero Trust → Access → Applications). Both empty = off.
+  access: {
+    teamDomain: (process.env.CF_ACCESS_TEAM_DOMAIN || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
+    aud: process.env.CF_ACCESS_AUD || '',
+  },
   databaseUrl: process.env.DATABASE_URL || 'postgres://des:des@localhost:5433/des',
 
   // IQGateway (OpenAI-compatible). The key is bound to one client + one product wallet.

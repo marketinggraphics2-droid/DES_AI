@@ -688,8 +688,29 @@
   // ---------------- settings ----------------
   async function pageSettings() {
     loading();
-    let facts, gloss, prompt, bans; try { [facts, gloss, prompt, bans] = await Promise.all([api('/admin/facts'), api('/admin/glossary'), api('/admin/prompt'), api('/admin/bans')]); } catch (e) { return fail(e); }
+    let facts, gloss, prompt, bans, sites; try { [facts, gloss, prompt, bans, sites] = await Promise.all([api('/admin/facts'), api('/admin/glossary'), api('/admin/prompt'), api('/admin/bans'), api('/admin/sites')]); } catch (e) { return fail(e); }
     const s = state.status;
+    const embedCode = `<script src="${sites.base}/widget/embed.js" data-api="${sites.base}/api" defer></script>`;
+    const codeTa = h('textarea', { class: 'input mono', rows: 2, readOnly: true, 'aria-label': 'Embed code', on: { focus: (e) => e.target.select() } }); codeTa.value = embedCode;
+    const copyCode = async () => {
+      try { await navigator.clipboard.writeText(embedCode); } catch { codeTa.select(); document.execCommand('copy'); }
+      toast('Embed code copied');
+    };
+    const siteRow = (origin, { note, added_at, fixed } = {}) => h('tr', null,
+      h('td', { class: 'mono', text: origin }),
+      h('td', null, fixed ? badge('Server settings') : note ? h('span', { text: note }) : h('span', { class: 'muted', text: '—' })),
+      h('td', { class: 'muted', text: fixed ? '' : when(added_at) }),
+      h('td', { style: { whiteSpace: 'nowrap', textAlign: 'right' } }, fixed ? null : h('button', { class: 'btn btn--sm btn--ghost btn--danger', type: 'button', text: 'Remove', on: { click: async () => {
+        if (!confirm(`Stop showing the chat on ${origin}?`)) return;
+        try { await api('/admin/sites?origin=' + encodeURIComponent(origin), { method: 'DELETE' }); toast('Removed'); pageSettings(); } catch (e) { fail(e); }
+      } } })));
+    const newSite = h('input', { class: 'input mono', placeholder: 'https://www.example.com', 'aria-label': 'Website address' });
+    const newNote = h('input', { class: 'input', placeholder: 'Note (optional), e.g. client test site', 'aria-label': 'Note' });
+    const addSite = async () => {
+      if (!newSite.value.trim()) return toast('Enter the website address', true);
+      try { const r = await api('/admin/sites', { method: 'POST', body: { origin: newSite.value.trim(), note: newNote.value.trim() } }); toast(`Chat allowed on ${r.origin}`); pageSettings(); } catch (e) { fail(e); }
+    };
+    newSite.addEventListener('keydown', (e) => { if (e.key === 'Enter') addSite(); });
     const factRow = (f = { key: '', value: '' }, isNew = false) => {
       const key = h('input', { class: 'input mono', value: f.key, placeholder: 'key_name', readOnly: !isNew, 'aria-label': 'Fact name' });
       const val = h('input', { class: 'input', value: f.value, placeholder: 'Value', 'aria-label': 'Fact value' });
@@ -720,6 +741,16 @@
           h('dt', { text: 'Answer matching' }), h('dd', { text: `An approved answer is used when the match score is at least ${Math.round(s.golden_min_score * 100)}% (GOLDEN_MIN_SCORE).` }),
           h('dt', { text: 'Daily AI budget' }), h('dd', { text: usd(s.daily_budget_usd) + ' (DAILY_BUDGET_USD)' }),
         ))),
+        h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Website widget' }),
+            h('p', { text: 'Paste this code into an allowed website (WordPress: the site footer) and the chat appears bottom-right. On any other website it stays hidden.' })),
+          h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Copy code', on: { click: copyCode } })),
+          h('div', { class: 'card__body' }, codeTa,
+            h('h3', { style: { margin: '18px 0 4px', fontSize: '14px' }, text: 'Allowed websites' }),
+            h('p', { class: 'muted', style: { margin: '0 0 8px', fontSize: '13px' }, text: 'Add the address exactly as visitors see it. www and non-www are different sites; any path is ignored, so one entry covers every page.' })),
+          h('div', { class: 'table-wrap' }, h('table', null, h('tbody', null,
+            sites.fixed.map((o) => siteRow(o, { fixed: true })),
+            sites.sites.map((x) => siteRow(x.origin, x)),
+            h('tr', null, h('td', null, newSite), h('td', null, newNote), h('td', null), h('td', { style: { textAlign: 'right' } }, h('button', { class: 'btn btn--sm', type: 'button', text: '+ Add website', on: { click: addSite } }))))))),
         h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Bans after ended chats' }),
             h('p', { text: 'When DES ends a chat for repeated off-topic or abusive messages, that device, contact and visitor are paused for 24 h and the connection for 1 h.' })),
           h('button', { class: 'btn btn--danger', type: 'button', disabled: !bans.active, text: 'Lift all bans', on: { click: async () => {
