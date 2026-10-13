@@ -285,3 +285,20 @@ create table if not exists app_settings (      -- dashboard overrides of .env va
   updated_by text,
   updated_at timestamptz default now()
 );
+
+-- ---- share links: one conversation as a read-only page without sign-in (2026-10-13) ----
+create table if not exists share_links (
+  id bigserial primary key,
+  token_hash text unique not null,             -- sha256 of the 256-bit token in the link; the token itself is never stored
+  conversation_id uuid references conversations(id) on delete cascade,
+  created_by uuid,
+  created_by_email text,
+  created_at timestamptz default now(),
+  expires_at timestamptz not null,             -- 24 h / 7 days (default) / 30 days
+  revoked_at timestamptz,
+  revoked_by_email text,
+  view_count int not null default 0,
+  last_viewed_at timestamptz,
+  summary text                                 -- AI-written summary, made when the link is created
+);
+create index if not exists share_links_conv_idx on share_links(conversation_id);

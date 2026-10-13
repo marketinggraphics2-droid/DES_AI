@@ -481,6 +481,17 @@
         if (d.state === 'start') typingTimer = setTimeout(() => { typingEl.hidden = true; }, d.expires_ms || 6000);
       }
     };
+    // share link (Admin / Superuser): a read-only page without sign-in, e.g. for a manager
+    const shareBox = h('div');
+    async function loadShares() {
+      if (!can('share.create')) return;
+      let links; try { links = await api('/admin/shares?conversation_id=' + id); } catch (e) { return fail(e); }
+      shareBox.replaceChildren(...links.map((l) => h('div', { class: 'share-row' },
+        h('span', { class: 'muted', text: `Link by ${l.created_by_email || '—'} · expires ${when(l.expires_at)} · opened ${l.view_count}×` }),
+        h('button', { class: 'link-btn', type: 'button', text: 'Revoke', on: { click: async () => { if (!confirm('Stop this link from working?')) return; try { await api('/admin/shares/' + l.id, { method: 'DELETE' }); toast('Link revoked'); loadShares(); } catch (e) { fail(e); } } } }))));
+    }
+    const shareBtn = !can('share.create') ? null : h('button', { class: 'btn btn--sm', type: 'button', text: 'Create share link', on: { click: () => openShare(id, c.name, loadShares) } });
+    loadShares();
     const lead = c.lead;
     body.replaceChildren(
       h('section', { class: 'card', style: { marginBottom: '16px' } }, h('div', { class: 'card__body' }, h('dl', { class: 'kv' },
@@ -493,6 +504,7 @@
           h('div', { class: 'muted', text: [lead.company, lead.industry, lead.team_size && lead.team_size + ' people', lead.current_system].filter(Boolean).join(' · ') }))] : null,
         c.handoffs.length ? [h('dt', { text: 'Handoffs' }), h('dd', { text: c.handoffs.map((x) => x.reason).join('; ') })] : null,
       ))),
+      shareBtn ? h('div', { class: 'share-box' }, shareBtn, shareBox) : null,
       tabs.children.length ? tabs : null,
       panel,
       typingEl,
@@ -802,8 +814,8 @@
   async function pageSettings() {
     loading();
     const get = (perm, path, empty) => (can(perm) ? api(path) : Promise.resolve(empty));
-    let facts, gloss, prompt, bans, sites, settings;
-    try { [facts, gloss, prompt, bans, sites, settings] = await Promise.all([get('facts.manage', '/admin/facts', []), get('facts.manage', '/admin/glossary', []), get('prompt.manage', '/admin/prompt', {}), get('bans.manage', '/admin/bans', { active: 0, by_kind: {}, bans: [] }), get('settings.manage', '/admin/sites', { base: '', fixed: [], sites: [] }), get('settings.manage', '/admin/settings', [])]); } catch (e) { return fail(e); }
+    let facts, gloss, prompt, bans, sites, settings, shares;
+    try { [facts, gloss, prompt, bans, sites, settings, shares] = await Promise.all([get('share.create', '/admin/shares', []), get('facts.manage', '/admin/facts', []), get('facts.manage', '/admin/glossary', []), get('prompt.manage', '/admin/prompt', {}), get('bans.manage', '/admin/bans', { active: 0, by_kind: {}, bans: [] }), get('settings.manage', '/admin/sites', { base: '', fixed: [], sites: [] }), get('settings.manage', '/admin/settings', [])]).then(([sh, ...rest]) => [...rest, sh]); } catch (e) { return fail(e); }
     const s = state.status;
     const embedCode = `<script src="${sites.base}/widget/embed.js" data-api="${sites.base}/api" defer></script>`;
     const settingInputs = settings.map((x) => { const i = h('input', { class: 'input', type: 'number', min: 0, step: '0.5', value: x.value ?? '', placeholder: String(x.effective), 'aria-label': x.label }); i.dataset.key = x.key; return { x, i }; });
@@ -855,6 +867,12 @@
             try { await api('/admin/settings', { method: 'PUT', body }); toast('Saved'); state.status = await api('/admin/status'); renderFoot(); pageSettings(); } catch (e) { fail(e); }
           } } })),
           h('div', { class: 'card__body' }, h('dl', { class: 'kv' }, settingInputs.map(({ x, i }) => [h('dt', { text: x.label }), h('dd', null, i, h('div', { class: 'note', text: `${x.help} Now: ${x.effective}${x.updated_by ? ` · changed by ${x.updated_by} ${when(x.updated_at)}` : ''}` }))])))),
+        !can('share.create') ? null : h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Active share links' }), h('p', { text: 'Conversations shared as a read-only page. Create one from a conversation; revoke here or there.' }))),
+          shares.length ? h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, ['Conversation', 'Created by', 'Expires', 'Opened', ''].map((t) => h('th', { text: t })))), h('tbody', null, shares.map((l) => h('tr', null,
+            h('td', null, h('button', { class: 'link-btn', type: 'button', text: l.name, on: { click: () => openConversation(l.conversation_id) } })),
+            h('td', { class: 'muted', text: `${l.created_by_email || '—'} · ${when(l.created_at)}` }), h('td', { class: 'muted', text: when(l.expires_at) }), h('td', { class: 'num', text: `${l.view_count}×` }),
+            h('td', { style: { textAlign: 'right' } }, h('button', { class: 'btn btn--sm btn--ghost btn--danger', type: 'button', text: 'Revoke', on: { click: async () => { if (!confirm('Stop this link from working?')) return; try { await api('/admin/shares/' + l.id, { method: 'DELETE' }); toast('Link revoked'); pageSettings(); } catch (e) { fail(e); } } } })))))))
+            : h('div', { class: 'card__body' }, h('p', { class: 'muted', style: { margin: 0 }, text: 'No active share links.' }))),
         h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('h2', { text: 'Connection' })), h('div', { class: 'card__body' }, h('dl', { class: 'kv' },
           h('dt', { text: 'Mode' }), h('dd', { text: s.mock ? 'Mock (no AI key; canned answers)' : 'Live AI through IQGateway' }),
           h('dt', { text: 'AI model' }), h('dd', { class: 'mono', text: s.model }),
@@ -899,6 +917,32 @@
             } } })))),
       ),
     );
+  }
+
+  // ---------------- share links ----------------
+  function openShare(conversationId, name, after) {
+    const ttl = h('select', { class: 'input', 'aria-label': 'Link works for' }, [['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']].map(([v, t]) => h('option', { value: v, text: t })));
+    ttl.value = '7d';
+    const out = h('div');
+    const create = h('button', { class: 'btn btn--primary', type: 'submit', text: 'Create link' });
+    const form = h('form', { class: 'modal__card', style: { width: 'min(520px, 100%)' }, on: { submit: async (e) => {
+      e.preventDefault(); create.disabled = true; create.textContent = 'Creating…';
+      try {
+        const r = await api(`/admin/conversations/${conversationId}/share`, { method: 'POST', body: { ttl: ttl.value } });
+        const url = h('input', { class: 'input mono', readOnly: true, value: r.url, 'aria-label': 'Share link', on: { focus: (ev) => ev.target.select() } });
+        out.replaceChildren(h('div', { class: 'callout', style: { marginTop: '12px' } }, 'Copy it now: for safety it is shown only once. It works until ' + when(r.expires_at) + '.'), url,
+          h('div', { style: { marginTop: '8px' } }, h('button', { class: 'btn btn--sm', type: 'button', text: 'Copy link', on: { click: async () => { try { await navigator.clipboard.writeText(r.url); } catch { url.select(); document.execCommand('copy'); } toast('Link copied'); } } })));
+        create.hidden = true; after?.();
+      } catch (err) { fail(err); create.disabled = false; create.textContent = 'Create link'; }
+    } } },
+      h('div', { class: 'modal__head' }, h('div', null, h('h2', { text: 'Share this conversation' }), h('p', { text: `Anyone with the link can read ${name}'s details and the whole chat without signing in. You can revoke it any time.` }))),
+      h('div', { class: 'modal__body' }, h('label', { class: 'field' }, h('span', { text: 'Link works for' }), ttl), out),
+      h('div', { class: 'modal__foot' }, h('button', { class: 'btn', type: 'button', text: 'Close', on: { click: closeLayer } }), create));
+    // the drawer stays underneath: show the dialog on top of it
+    const holder = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Share this conversation', style: { zIndex: 60 } }, form);
+    layer.append(holder); ttl.focus();
+    const closeOnly = () => holder.remove();
+    form.querySelector('.modal__foot .btn').onclick = closeOnly;
   }
 
   // ---------------- users (superuser) ----------------

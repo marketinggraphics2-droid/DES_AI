@@ -10,6 +10,7 @@ import { accessUser, adminClientIp } from './access.js';
 import { adminAuth, authRouter } from './auth.js';
 import { invalidateSettings } from './settings.js';
 import { closeStreams } from './events.js';
+import { shareAdmin, sharePage } from './share.js';
 import { loadSites, isAllowedOrigin, anySitesConfigured } from './sites.js';
 import { pool, exec } from './db.js';
 import fs from 'node:fs';
@@ -50,7 +51,7 @@ app.use('/api', (req, res, next) => {
 });
 app.use((req, _res, next) => { req.ip_raw = req.ip; next(); });
 // dashboard: signed-in user + permission check on every /api/admin route (auth.js, permissions.js)
-app.use('/api/admin', adminAuth, authRouter);
+app.use('/api/admin', adminAuth, authRouter, shareAdmin);
 app.use('/api', r);
 // npm run stop: admin token + only from this computer (not through the tunnel, which adds Cloudflare headers)
 app.post('/api/admin/shutdown', (req, res) => {
@@ -61,6 +62,8 @@ app.post('/api/admin/shutdown', (req, res) => {
   setTimeout(() => requestStop('stop requested', 99), 100); // 99 tells scripts/dev.js to exit instead of waiting
 });
 app.use('/api/admin', adminRouter);
+// share link: the one public, read-only page outside /admin (no sign-in, no IP or website check; the token is the key)
+app.get('/share/:token', sharePage);
 // admin dashboard (data needs a signed-in user; the page itself is static)
 app.use('/admin', express.static(fileURLToPath(new URL('../../admin', import.meta.url)), { maxAge: 0 }));
 // widget files for the one-line embed (<script src=".../widget/embed.js">); any origin may load them

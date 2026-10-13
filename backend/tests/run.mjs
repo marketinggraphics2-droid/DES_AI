@@ -566,6 +566,47 @@ if (want('live')) await guard('live', async () => {
 });
 
 // =====================================================================================
+sec('10e. Share links (read-only conversation page without sign-in)');
+if (want('share')) await guard('share', async () => {
+  const id = ident(); const phone = uniquePhone(); const s = await A.session(id, { phone, name: 'Share Tester' });
+  const cid = s.json.session_id;
+  await A.chat(s.token, 'Do you handle BIR CAS for a 40-person trading company?', id);
+  await A.chat(s.token, 'My card is 4111 1111 1111 1111, can you help with SAP?', id);
+  let r = await A.req('POST', `/api/admin/conversations/${cid}/share`, { as: 'user', body: { ttl: '7d' } });
+  ok('User role cannot create share links', r.status === 403);
+  r = await A.req('POST', `/api/admin/conversations/${cid}/share`, { as: 'admin', body: { ttl: '7d' } });
+  ok('Admin creates a 7-day share link', r.status === 200 && /\/share\/[A-Za-z0-9_-]+$/.test(r.json.url) && Math.abs(new Date(r.json.expires_at) - Date.now() - 7 * 86400e3) < 120e3, r.text);
+  const url = r.json.url, token = url.split('/share/')[1], linkId = r.json.id;
+  ok('token is long and random (≥ 256 bits), not the conversation id', token.length >= 43 && !token.includes(cid) && !url.includes(cid), token.length + ' chars');
+  // opened from the internet, no sign-in
+  const pub = { 'cf-connecting-ip': '203.0.113.120' };
+  r = await fetch(base + '/share/' + token, { headers: pub });
+  const html = await r.text();
+  ok('opens without sign-in through the tunnel', r.status === 200 && /Share Tester/.test(html));
+  ok('shows name, phone, interest, summary and the transcript', html.includes('+63' + phone.slice(1)) && /What they need/.test(html) && /BIR CAS for a 40-person/.test(html) && /class="m a/.test(html), html.length + ' bytes');
+  ok('card numbers stay masked on the page', !/4111/.test(html) && /\[redacted\]/.test(html));
+  ok('noindex, nofollow, no caching, no referrer, no scripts allowed', /noindex/.test(r.headers.get('x-robots-tag') || '') && /no-store/.test(r.headers.get('cache-control') || '') && r.headers.get('referrer-policy') === 'no-referrer' && /default-src 'none'/.test(r.headers.get('content-security-policy') || '') && !/<script/i.test(html));
+  r = await fetch(base + '/admin/', { headers: pub }); ok('the dashboard itself is still hidden from the internet', r.status === 404);
+  const list = (await A.req('GET', `/api/admin/shares?conversation_id=${cid}`, { as: 'admin' })).json;
+  ok('active links list shows creator and views', list.length === 1 && list[0].created_by_email === USERS.admin && list[0].view_count === 1, JSON.stringify(list[0]));
+  // revoke
+  r = await A.req('DELETE', '/api/admin/shares/' + linkId, { admin: true });
+  r = await fetch(base + '/share/' + token, { headers: pub });
+  const gone = await r.text();
+  ok('revoked link → "This link is no longer available"', r.status === 410 && /no longer available/.test(gone) && !/Share Tester/.test(gone));
+  r = await fetch(base + '/share/' + 'x'.repeat(43), { headers: pub });
+  ok('unknown token → same page, nothing revealed', r.status === 404 && /no longer available/.test(await r.text()));
+  // expiry
+  const short = (await A.req('POST', `/api/admin/conversations/${cid}/share`, { as: 'admin', body: { ttl: 'test-2s' } })).json;
+  ok('a short link works before it expires', (await fetch(short.url, { headers: pub })).status === 200);
+  await sleep(2500);
+  ok('expired link → "no longer available"', (await fetch(short.url, { headers: pub })).status === 410);
+  // audit
+  const au = (await A.req('GET', '/api/admin/audit?action=share&limit=50', { admin: true })).json;
+  ok('created, viewed and revoked are in the audit log', ['share.created', 'share.viewed', 'share.revoked'].every((a) => au.some((x) => x.action === a && x.target === cid)), [...new Set(au.map((x) => x.action))].join(','));
+});
+
+// =====================================================================================
 sec('10b. Access from the internet (through the tunnel)');
 if (want('access')) await guard('access', async () => {
   const pub = { 'cf-connecting-ip': '203.0.113.77' };
@@ -728,6 +769,9 @@ if (want('dashboard')) await guard('dashboard', async () => {
   ok('User role menu: Overview, Conversations, Leads only', visible === 'overview,conversations,leads', visible);
   U.w.location.hash = '#/leads'; await until(() => U.$('#main h1')?.textContent === 'Leads', 8000); await sleep(300);
   ok('User role: no CSV export button', !U.$$('#main button').some((b) => /Download CSV/.test(b.textContent)));
+  U.w.location.hash = '#/conversations'; await until(() => U.$('tr.is-click'), 8000); U.$('tr.is-click').click(); await until(() => U.$('.drawer .thread'), 8000);
+  ok('User role: no share link or delete button in a conversation', ![...U.$$('.drawer button')].some((b) => /Create share link|Delete this visitor/.test(b.textContent)));
+  U.d.dispatchEvent(new U.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
   U.w.location.hash = '#/settings'; await sleep(600);
   ok('User role: typing a hidden page address shows the Overview instead', U.$('#main h1')?.textContent !== 'Settings', U.$('#main h1')?.textContent);
   await until(() => !U.$('#main .loading'), 10000); await sleep(500);
@@ -778,6 +822,7 @@ if (want('dashboard')) await guard('dashboard', async () => {
   }
   await go('#/conversations'); P.$('tr.is-click').click(); await until(() => P.$('.drawer .thread'), 8000);
   ok('conversation drawer opens with messages', P.$$('.drawer .msg').length > 0);
+  ok('drawer offers "Create share link" to a superuser', [...P.$$('.drawer button')].some((b) => /Create share link/.test(b.textContent)));
   P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100); ok('Escape closes it', !P.$('.drawer'));
   await go('#/finetune/IQ%20People');
   [...P.$$('button')].find((b) => b.textContent.includes('Add approved answer')).click(); await sleep(200);

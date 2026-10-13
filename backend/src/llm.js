@@ -247,6 +247,16 @@ export async function classifyLLM(text) {
   } catch (e) { console.error('screen failed (allowed):', e.message); return 'on_topic'; }
 }
 
+/** 2–3 sentences for the shared conversation page (a manager reads it). No contact details. */
+export async function shareSummary(transcript) {
+  if (isMock()) return transcript.slice(0, 280);
+  return complete({
+    model: cfg.guardModel, maxTokens: 160,
+    system: 'Summarize this website sales chat for a sales manager in 2–3 short sentences: who the visitor is (company and role if known), what they need, which DynamIQ products fit, and the next step agreed. Plain text, no lists. Never include phone numbers or email addresses.',
+    user: transcript.slice(0, 8000),
+  });
+}
+
 export async function summarize(transcript) {
   if (isMock()) return transcript.slice(0, 140);
   return complete({
