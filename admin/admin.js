@@ -96,7 +96,9 @@
   const statusBadge = (s) => { const [t, c] = STATUS_BADGE[s] || [s, '']; return h('span', { class: 'badge ' + c, text: t }); };
   const badge = (text, cls = '') => h('span', { class: 'badge ' + cls, text });
   const CONTACT_LABEL = { work_email: 'Work email', email: 'Personal email', mobile: 'Mobile', landline: 'Landline', viber: 'Viber', whatsapp: 'WhatsApp', wechat: 'WeChat', telegram: 'Telegram', signal: 'Signal', line: 'LINE' };
-  const contactBadge = (type) => type ? badge(CONTACT_LABEL[type] || type, type === 'work_email' ? 'badge--good' : '') : null;
+  const contactBadge = (type) => type && type !== 'mobile' ? badge(CONTACT_LABEL[type] || type, type === 'work_email' ? 'badge--good' : '') : null;
+  /** Mobile number (+ Viber / WhatsApp label) and, when given, email: list cells and the conversation header. */
+  const contactLines = (x) => [h('div', { class: 'muted', text: x.phone || '' }, ' ', contactBadge(x.phone_type)), x.email ? h('div', { class: 'muted', text: x.email }, ' ', contactBadge(x.email_type)) : null];
   const priceLike = (s) => /₱|\bPHP\s?\d|\bP\s?\d{1,3}(,\d{3})+|\b\d{1,3}(,\d{3})+(\.\d+)?\s?(pesos|php)\b/i.test(s || '');
 
   // ---------------- login / shell ----------------
@@ -317,7 +319,7 @@
       if (!rows.length) tbody.append(h('tr', null, h('td', { colspan: 7 }, empty('No conversations found', 'Try another filter.'))));
       rows.forEach((c) => tbody.append(h('tr', { class: 'is-click', tabindex: '0', on: { click: () => openConversation(c.id), keydown: (e) => { if (e.key === 'Enter') openConversation(c.id); } } },
         h('td', { class: 'muted', text: when(c.started_at), style: { whiteSpace: 'nowrap' } }),
-        h('td', null, h('div', { text: c.name, style: { fontWeight: 600 } }), h('div', { class: 'muted', text: c.contact || '' }), contactBadge(c.contact_type)),
+        h('td', null, h('div', { text: c.name, style: { fontWeight: 600 } }), contactLines(c)),
         h('td', null, h('div', { class: 'clip', text: c.first_question || '—', title: c.first_question || '' }), c.summary ? h('div', { class: 'muted clip', text: c.summary }) : null),
         h('td', null, h('div', { class: 'badges' }, (c.products || []).map((p) => badge(p)))),
         h('td', { class: 'num', text: c.turns }),
@@ -407,7 +409,8 @@
     const lead = c.lead;
     body.replaceChildren(
       h('section', { class: 'card', style: { marginBottom: '16px' } }, h('div', { class: 'card__body' }, h('dl', { class: 'kv' },
-        h('dt', { text: 'Contact' }), h('dd', null, c.contact || '—', ' ', contactBadge(c.contact_type)),
+        h('dt', { text: 'Mobile' }), h('dd', null, c.phone || '—', ' ', contactBadge(c.phone_type)),
+        h('dt', { text: 'Email' }), h('dd', null, c.email || '—', ' ', contactBadge(c.email_type)),
         h('dt', { text: 'Marketing opt-in' }), h('dd', { text: c.marketing_opt_in ? 'Yes' : 'No' }),
         h('dt', { text: 'First page' }), h('dd', null, c.first_page_url ? h('a', { href: c.first_page_url, target: '_blank', rel: 'noopener', text: c.first_page_url }) : '—'),
         c.summary ? [h('dt', { text: 'Summary' }), h('dd', { text: c.summary })] : null,
@@ -441,7 +444,7 @@
             LEAD_STATUSES.map((s) => h('option', { value: s, text: s[0].toUpperCase() + s.slice(1), selected: s === l.status })));
           return h('tr', { class: 'is-click', on: { click: () => l.conversation_id && openConversation(l.conversation_id) } },
             h('td', { class: 'muted', text: when(l.created_at), style: { whiteSpace: 'nowrap' } }),
-            h('td', null, h('div', { text: l.name, style: { fontWeight: 600 } }), h('div', { class: 'muted', text: l.contact || '' }), contactBadge(l.contact_type)),
+            h('td', null, h('div', { text: l.name, style: { fontWeight: 600 } }), contactLines(l)),
             h('td', null, h('div', { class: 'clip', text: l.need || '—', title: l.need || '' }), l.summary ? h('div', { class: 'muted clip', text: l.summary }) : null),
             h('td', null, h('div', { class: 'badges' }, (l.product_interest || []).map((p) => badge(p, 'badge--brand')), l.demo_requested ? badge('Demo', 'badge--brand') : null)),
             h('td', null, h('div', { text: l.company || '—' }), h('div', { class: 'muted', text: [l.industry, l.team_size].filter(Boolean).join(' · ') })),

@@ -27,27 +27,28 @@
   // ---------- copy (EN / FIL) ----------
   const T = {
     en: {
-      intro: `Happy to help with that! Before I answer, a quick formality: I'll collect your name and one contact so our team can follow up. By continuing you agree to our <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Privacy Notice</a>.<small>We never ask for passwords, IDs or payment details.</small>`,
+      intro: `Happy to help with that! Before I answer, a quick formality: I'll collect your name and mobile number so our team can follow up. By continuing you agree to our <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Privacy Notice</a>.<small>We never ask for passwords, IDs or payment details.</small>`,
       agree: 'I agree ✓', readNotice: 'Read the Privacy Notice',
       notYet: "No problem — tap <b>I agree</b> when you're ready. You can also browse our <a href=\"https://dynamiqes.com/products/\" target=\"_blank\" rel=\"noopener\">Products page</a> meanwhile.",
-      askName: 'Great, thanks. What\'s your name?<small>The chat starts once I have your name and a way to reach you. If you leave, reload the page or don\'t reply for 5 minutes before then, it will start over.</small>',
+      askName: 'Great, thanks. What\'s your full name?<small>The chat starts once I have your name and mobile number. If you leave, reload the page or don\'t reply for 5 minutes before then, it will start over.</small>',
       onboardWarn: (what) => `Still there? I just need your ${what} to continue. <b>This chat will start over in 1 minute</b> if I don't hear from you.`,
-      onboardWhat: { consent: 'OK to the privacy notice', name: 'name', contact: 'email or mobile number', optin: 'answer on updates' },
-      onboardReset: 'This chat started over because I didn\'t get your name and contact in time. Ask your question again whenever you\'re ready.',
+      onboardWhat: { consent: 'OK to the privacy notice', name: 'name', phone: 'mobile number', optin: 'answer on updates' },
+      onboardReset: 'This chat started over because I didn\'t get your name and mobile number in time. Ask your question again whenever you\'re ready.',
       nameFirst: "I'll get to that right after — may I have your name first?",
       badName: 'Just your name, please (letters only).',
       badNameFake: "Please share your real name so our team knows who they're talking to.",
-      askContact: (n) => `Nice to meet you, ${n}. Where can our team reach you? A <b>work email</b> is best, or a mobile, Viber or WhatsApp number.`,
-      badContact: 'That doesn\'t look like an email or phone number. Try a work email (name@company.com) or a mobile number like <b>0917 123 4567</b>. For numbers outside the Philippines, add the country code, e.g. <b>+65 9123 4567</b>.',
-      fakeContact: 'That looks like a sample or placeholder. Please share a real email or number so our team can reply.',
-      disposableEmail: 'Temporary inboxes can\'t receive our reply. Please use your work or personal email, or a mobile number.',
-      emailDomain: 'That email domain can\'t receive mail. Could you check the spelling, or share a mobile number instead?',
-      ownContact: 'That\'s DynamIQ\'s own contact. Please share yours so our team can reach you.',
-      needContact: `I need a way for our team to reach you before I can continue. If you'd rather not share it here, contact us directly at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
-      workEmailAsk: (e) => `Thanks! Do you have a <b>work email</b>? It helps our team prepare for your business. Or continue with ${e}.`,
-      useThis: (e) => `Use ${e}`,
+      askPhone: (n) => `Nice to meet you, ${n}. What\'s your <b>mobile number</b>, so our team can reach you? Viber or WhatsApp numbers work too.`,
+      phoneFirst: 'I\'ll answer that right after. What\'s your <b>mobile number</b>?',
+      badPhone: 'That doesn\'t look like a phone number. Try a mobile number like <b>0917 123 4567</b>. For numbers outside the Philippines, add the country code, e.g. <b>+65 9123 4567</b>.',
+      phoneNotEmail: 'I need your <b>mobile number</b> here, not an email.',
+      phoneNeedsNumber: 'Please type the <b>number</b> itself (e.g. 0917 123 4567). A Telegram, LINE or WeChat username alone isn\'t enough for our team to call you.',
+      fakePhone: 'That looks like a sample or placeholder number. Please share a real number so our team can call you.',
+      ownPhone: 'That\'s DynamIQ\'s own number. Please share yours so our team can reach you.',
+      needPhone: `I need your mobile number before I can continue. If you'd rather not share it here, contact us directly at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
+      needPhoneReturning: (n) => `Welcome back, ${n}! Before we continue, what\'s your <b>mobile number</b>, so our team can reach you?`,
+      continueAs: (n, p) => `Welcome back! Continue as <b>${n}</b> · ${p}?`, itsMe: 'Yes, that\'s me', notMe: 'Not me',
       tooMany: `We've had several chats from this device or contact today. Please reach us directly at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
-      phName: 'Type your name…', phContact: 'Work email or mobile number…', phMsg: 'Type your message…', replying: 'DES is replying…', chatEnded: 'This chat has ended', pickOption: 'Choose an option above…', skip: 'Skip',
+      phName: 'Type your full name…', phPhone: 'Mobile number…', phMsg: 'Type your message…', replying: 'DES is replying…', chatEnded: 'This chat has ended', pickOption: 'Choose an option above…', skip: 'Skip',
       until: 'until',
       endedNotice: (u) => `This chat was ended because it went off-topic${u ? `, and is paused until <b>${u}</b>` : ''}. For questions about DynamIQ, our team is at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
       optIn: 'Would you also like occasional updates on DynamIQ products and events?',
@@ -76,27 +77,28 @@
       chips: ['Book a free demo', 'Which product fits my business?', 'BIR CAS compliance', 'Talk to a consultant']
     },
     fil: {
-      intro: `Sige, tutulungan kita diyan! Bago ako sumagot, kukunin ko lang ang pangalan mo at isang contact para maka-follow up ang team namin. Sa pagpapatuloy, sumasang-ayon ka sa aming <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Privacy Notice</a>.<small>Hindi kami humihingi ng password, ID o payment details.</small>`,
+      intro: `Sige, tutulungan kita diyan! Bago ako sumagot, kukunin ko lang ang pangalan at mobile number mo para maka-follow up ang team namin. Sa pagpapatuloy, sumasang-ayon ka sa aming <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Privacy Notice</a>.<small>Hindi kami humihingi ng password, ID o payment details.</small>`,
       agree: 'Sang-ayon ako ✓', readNotice: 'Basahin ang Privacy Notice',
       notYet: 'Walang problema — i-tap lang ang <b>Sang-ayon ako</b> kapag handa ka na.',
-      askName: 'Salamat! Anong pangalan mo?<small>Magsisimula ang chat kapag nakuha ko na ang pangalan mo at paraan para makontak ka. Kung aalis ka, magre-reload, o hindi sasagot nang 5 minuto bago noon, magsisimula ulit ang chat.</small>',
+      askName: 'Salamat! Ano ang buong pangalan mo?<small>Magsisimula ang chat kapag nakuha ko na ang pangalan at mobile number mo. Kung aalis ka, magre-reload, o hindi sasagot nang 5 minuto bago noon, magsisimula ulit ang chat.</small>',
       onboardWarn: (what) => `Nandiyan ka pa ba? Kailangan ko lang ang ${what} mo para magpatuloy. <b>Magsisimula ulit ang chat sa loob ng 1 minuto</b> kung walang sagot.`,
-      onboardWhat: { consent: 'pagsang-ayon sa privacy notice', name: 'pangalan', contact: 'email o mobile number', optin: 'sagot tungkol sa updates' },
-      onboardReset: 'Nagsimula ulit ang chat dahil hindi ko nakuha ang pangalan at contact mo sa oras. Itanong mo ulit kapag handa ka na.',
+      onboardWhat: { consent: 'pagsang-ayon sa privacy notice', name: 'pangalan', phone: 'mobile number', optin: 'sagot tungkol sa updates' },
+      onboardReset: 'Nagsimula ulit ang chat dahil hindi ko nakuha ang pangalan at mobile number mo sa oras. Itanong mo ulit kapag handa ka na.',
       nameFirst: 'Sasagutin ko \'yan pagkatapos — pwede bang malaman muna ang pangalan mo?',
       badName: 'Pangalan mo lang po (letra lang).',
       badNameFake: 'Pakibigay po ang tunay mong pangalan para alam ng team kung sino ang kausap nila.',
-      askContact: (n) => `Ikinagagalak kitang makilala, ${n}. Saan ka pwedeng kontakin? Pinakamaganda ang <b>work email</b>, o mobile, Viber o WhatsApp number.`,
-      badContact: 'Parang hindi valid na email o number \'yan. Subukan ang work email (pangalan@kompanya.com) o mobile number gaya ng <b>0917 123 4567</b>. Kung nasa labas ng Pilipinas, isama ang country code, hal. <b>+65 9123 4567</b>.',
-      fakeContact: 'Mukhang sample o placeholder \'yan. Pakibigay po ang totoong email o number para makasagot ang team namin.',
-      disposableEmail: 'Hindi makakatanggap ng reply ang temporary inbox. Pakigamit ang work o personal email, o mobile number.',
-      emailDomain: 'Hindi makakatanggap ng email ang domain na \'yan. Pakicheck ang spelling, o magbigay ng mobile number.',
-      ownContact: 'Contact po ng DynamIQ \'yan. Pakibigay ang sa \'yo para makontak ka ng team namin.',
-      needContact: `Kailangan ko ng paraan para makontak ka ng team bago tayo magpatuloy. Kung ayaw mong ibahagi dito, kontakin kami sa <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> o <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
-      workEmailAsk: (e) => `Salamat! May <b>work email</b> ka ba? Mas makakapaghanda ang team para sa negosyo mo. O magpatuloy gamit ang ${e}.`,
-      useThis: (e) => `Gamitin ang ${e}`,
+      askPhone: (n) => `Ikinagagalak kitang makilala, ${n}. Ano ang <b>mobile number</b> mo para makontak ka ng team namin? Pwede rin ang Viber o WhatsApp number.`,
+      phoneFirst: 'Sasagutin ko \'yan pagkatapos. Ano ang <b>mobile number</b> mo?',
+      badPhone: 'Parang hindi phone number \'yan. Subukan ang mobile number gaya ng <b>0917 123 4567</b>. Kung nasa labas ng Pilipinas, isama ang country code, hal. <b>+65 9123 4567</b>.',
+      phoneNotEmail: '<b>Mobile number</b> po ang kailangan ko dito, hindi email.',
+      phoneNeedsNumber: 'Pakitype po ang mismong <b>number</b> (hal. 0917 123 4567). Hindi sapat ang Telegram, LINE o WeChat username para matawagan ka ng team.',
+      fakePhone: 'Mukhang sample o placeholder na number \'yan. Pakibigay po ang totoong number para matawagan ka ng team.',
+      ownPhone: 'Number po ng DynamIQ \'yan. Pakibigay ang sa \'yo para makontak ka ng team namin.',
+      needPhone: `Kailangan ko ang mobile number mo bago tayo magpatuloy. Kung ayaw mong ibahagi dito, kontakin kami sa <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> o <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
+      needPhoneReturning: (n) => `Welcome back, ${n}! Bago tayo magpatuloy, ano ang <b>mobile number</b> mo para makontak ka ng team namin?`,
+      continueAs: (n, p) => `Welcome back! Magpatuloy bilang <b>${n}</b> · ${p}?`, itsMe: 'Oo, ako ito', notMe: 'Hindi ako',
       tooMany: `Marami nang chat mula sa device o contact na ito ngayong araw. Kontakin kami sa <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> o <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
-      phName: 'I-type ang pangalan mo…', phContact: 'Work email o mobile number…', phMsg: 'Mag-type ng mensahe…', replying: 'Sumasagot si DES…', chatEnded: 'Tapos na ang chat na ito', pickOption: 'Pumili sa mga opsyon sa itaas…', skip: 'Laktawan',
+      phName: 'I-type ang buong pangalan mo…', phPhone: 'Mobile number…', phMsg: 'Mag-type ng mensahe…', replying: 'Sumasagot si DES…', chatEnded: 'Tapos na ang chat na ito', pickOption: 'Pumili sa mga opsyon sa itaas…', skip: 'Laktawan',
       until: 'hanggang',
       endedNotice: (u) => `Tinapos ang chat na ito dahil napunta sa ibang usapan${u ? `, at naka-pause hanggang <b>${u}</b>` : ''}. Para sa tanong tungkol sa DynamIQ, nandito ang team namin: <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> o <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
       optIn: 'Gusto mo rin bang makatanggap ng updates tungkol sa DynamIQ products at events?',
@@ -125,7 +127,7 @@
       chips: ['Mag-book ng free demo', 'Aling product ang bagay sa akin?', 'BIR CAS compliance', 'Kausapin ang consultant']
     }
   };
-  const NOTICE = `<strong>Privacy Notice — DES, DynamIQ Website Assistant</strong>DynamIQ Enterprise Solutions Inc. collects your name and email address or mobile number, together with the messages you send in this chat, so we can answer your inquiry and have a member of our team follow up. We process this under the Data Privacy Act of 2012 (RA 10173), its IRR and NPC issuances, based on your consent and our legitimate interest in responding to inquiries. Your details are shared only with our sales and support staff and the providers that host this chat. We keep your information for as long as needed to handle your inquiry and up to 12 months afterwards, unless the law requires longer. You may withdraw consent or ask to access, correct or delete your data by emailing our Data Protection Officer at <a href="mailto:dpo@dynamiqes.com">dpo@dynamiqes.com</a>. Please do not share passwords, financial details, TIN or other sensitive information here. <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Full Privacy Policy →</a>`;
+  const NOTICE = `<strong>Privacy Notice — DES, DynamIQ Website Assistant</strong>DynamIQ Enterprise Solutions Inc. collects your name and mobile number (and your email address only if you give it, e.g. when booking a demo), together with the messages you send in this chat, so we can answer your inquiry and have a member of our team follow up. We process this under the Data Privacy Act of 2012 (RA 10173), its IRR and NPC issuances, based on your consent and our legitimate interest in responding to inquiries. Your details are shared only with our sales and support staff and the providers that host this chat. We keep your information for as long as needed to handle your inquiry and up to 12 months afterwards, unless the law requires longer. You may withdraw consent or ask to access, correct or delete your data by emailing our Data Protection Officer at <a href="mailto:dpo@dynamiqes.com">dpo@dynamiqes.com</a>. Please do not share passwords, financial details, TIN or other sensitive information here. <a href="${CFG.privacyUrl}" target="_blank" rel="noopener">Full Privacy Policy →</a>`;
 
   // ---------- helpers ----------
   const $ = (s, r = document) => r.querySelector(s);
@@ -165,12 +167,7 @@
   const BYE = /\b(bye|goodbye|thanks?,? (that'?s|thats) all|that'?s all|salamat,? bye|ingat|see you|ok thanks|thank you,? bye)\b/i;
   const PII = /(\d[ -]?){13,19}|\d{3}-\d{3}-\d{3}-\d{3}|\d{2}-\d{7}-\d|\d{4}-\d{4}-\d{4}/g; // cards, TIN, SSS, PhilHealth/Pag-IBIG-ish
   // ---- name + contact checks: mirror of backend/src/contact.js (the server re-checks and also verifies the email domain) ----
-  const FREE_EMAIL = new Set('gmail.com googlemail.com yahoo.com yahoo.com.ph ymail.com rocketmail.com outlook.com outlook.ph hotmail.com hotmail.ph live.com msn.com icloud.com me.com mac.com aol.com proton.me protonmail.com pm.me gmx.com gmx.net mail.com zoho.com zohomail.com yandex.com yandex.ru qq.com 163.com 126.com sina.com foxmail.com naver.com hanmail.net'.split(' '));
-  const DISPOSABLE = new Set('mailinator.com guerrillamail.com guerrillamail.net guerrillamail.org sharklasers.com grr.la 10minutemail.com 10minutemail.net tempmail.com temp-mail.org temp-mail.io tempmail.net tempmailo.com yopmail.com yopmail.net trashmail.com trashmail.de getnada.com nada.email dispostable.com maildrop.cc fakeinbox.com throwawaymail.com mintemail.com mohmal.com emailondeck.com tempail.com burnermail.io spamgourmet.com mailnesia.com moakt.com tmpmail.org tmpmail.net tmail.ws inboxkitten.com mailpoof.com getairmail.com emailfake.com fakemail.net 33mail.com mailcatch.com spambox.us discard.email crazymailing.com mail.tm mytemp.email luxusmail.org'.split(' '));
-  const PLACEHOLDER_DOMAIN = new Set('example.com example.net example.org test.com testing.com domain.com email.com sample.com fake.com fakemail.com asdf.com qwerty.com noemail.com none.com na.com xxx.com abc.xyz company.com yourcompany.com mycompany.com business.com website.com'.split(' '));
-  const FAKE_LOCAL = /^(test(ing|er)?\d*|sample|demo|asdf+|qwerty|abc+d?|abc123|x{2,}|a{2,}|none|noemail|no-?reply|null|na|n-?a|nobody|someone|anonymous|anon|user\d*|admin|email|mail|fake|dummy|example|\d+|hello|hi|me|myemail|your-?email|name)$/i;
   const FAKE_NAME = new Set('test testing tester sample demo user admin administrator anonymous anon none na nobody name myname noname guest visitor customer client asdf asd qwerty abc abcd xyz xxx aaa unknown secret private hello hi hey bot ai chatgpt gpt des dynamiq sir maam madam mister miss ako me myself i yo person human someone somebody fake dummy null undefined'.split(' '));
-  const EMAIL_RE = /^([a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?)@((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})$/;
   const PLATFORMS = [[/\bviber\b/i, 'viber'], [/\b(whats\s?app|wa)\b/i, 'whatsapp'], [/\b(we\s?chat|weixin)\b/i, 'wechat'], [/\b(telegram|tg)\b/i, 'telegram'], [/\bsignal\b/i, 'signal'], [/\bline\b/i, 'line']];
   const PHONE_WORDS = /\b(viber|whats\s?app|wa|we\s?chat|weixin|telegram|tg|signal|line|sms|text|call|mobile|mob|cell(phone)?|cp|phone|tel|telephone|landline|number|no|num|my|is|at|or|and|ph|philippines)\b|[#:]/gi;
   const NAME_PREFIX = /^(?:(?:hi|hello|hey|good (?:morning|afternoon|evening))[,!.\s]+)?(?:i'?m|i am|im|my name is|my name'?s|name is|name'?s|this is|it'?s|call me|ako si|ako po si|ako po|ako ay|si|ang pangalan ko ay|pangalan ko ay|pangalan ko)\s+(?=\S)/i;
@@ -191,35 +188,31 @@
     if (/^(\d{2})\1{3,}/.test(d.slice(-8)) || /^(\d{3})\1{2,}/.test(d.slice(-9))) return true;
     return new Set(d.slice(-7)).size <= 2;
   }
-  function checkContact(raw) {
+  /** Required mobile number (any label: Viber, WhatsApp…). A username alone doesn't count. */
+  function checkPhone(raw) {
     const s0 = String(raw || '').trim();
-    if (!s0) return { ok: false, code: 'contact_required' };
-    if (s0.includes('@')) {
-      const s = s0.toLowerCase().replace(/^(e-?mail|email address|my email is|mail)\s*[:\-]?\s*/i, '');
-      const m = s.match(EMAIL_RE);
-      if (!m || s.includes('..')) return { ok: false, code: 'bad_contact' };
-      const [, local, domain] = m;
-      if (DISPOSABLE.has(domain) || [...DISPOSABLE].some(d => domain.endsWith('.' + d))) return { ok: false, code: 'disposable_email' };
-      if (CFG.salesEmail && s === String(CFG.salesEmail).toLowerCase()) return { ok: false, code: 'own_contact' };
-      if (PLACEHOLDER_DOMAIN.has(domain) || /\.(test|example|invalid|localhost|local|lan|internal)$/i.test(domain) || /^(test|example|sample|fake|asdf)\./.test(domain) || FAKE_LOCAL.test(local)) return { ok: false, code: 'fake_contact' };
-      return { ok: true, value: s, type: FREE_EMAIL.has(domain) ? 'email' : 'work_email' };
-    }
+    if (!s0) return { ok: false, code: 'phone_required' };
     const platform = (PLATFORMS.find(([re]) => re.test(s0)) || [])[1] || null;
+    if (platform && (s0.match(/\d/g) || []).length < 7) return { ok: false, code: 'phone_needs_number' };
+    if (!platform && s0.includes('@') && (s0.match(/\d/g) || []).length < 7) return { ok: false, code: 'phone_not_email' };
     const st = s0.replace(PHONE_WORDS, ' ').replace(/[\s().\-–/]/g, '');
-    if (!/^\+?\d+$/.test(st)) return { ok: false, code: 'bad_contact' };
+    if (!/^\+?\d+$/.test(st)) return { ok: false, code: 'bad_phone' };
     let d = st.replace(/^\+/, ''); const intl = st.startsWith('+') || st.startsWith('00'); if (st.startsWith('00')) d = d.slice(2);
     let value, type;
     if (/^(63|0)?9\d{9}$/.test(d)) { value = '+63' + d.slice(-10); type = platform || 'mobile'; }
     else if (!intl && /^0[2-8]\d{7,8}$/.test(d)) { value = '+63' + d.slice(1); type = 'landline'; }
     else if (/^63[2-8]\d{7,8}$/.test(d)) { value = '+' + d; type = 'landline'; }
     else if (intl && /^[1-9]\d{7,14}$/.test(d)) { value = '+' + d; type = platform || 'mobile'; }
-    else return { ok: false, code: 'bad_contact' };
-    if (fakeDigits(value.replace(/^\+(63)?/, ''))) return { ok: false, code: 'fake_contact' };
+    else return { ok: false, code: 'bad_phone' };
+    if (fakeDigits(value.replace(/^\+(63)?/, ''))) return { ok: false, code: 'fake_phone' };
     const own = String(CFG.salesPhone || '').replace(/\D/g, '').replace(/^0/, '63').replace(/^63/, '');
-    if (own.length > 6 && value.replace(/\D/g, '').endsWith(own)) return { ok: false, code: 'own_contact' };
+    if (own.length > 6 && value.replace(/\D/g, '').endsWith(own)) return { ok: false, code: 'own_phone' };
     return { ok: true, value, type };
   }
-  const CONTACT_MSG = { bad_contact: 'badContact', contact_required: 'badContact', fake_contact: 'fakeContact', disposable_email: 'disposableEmail', email_domain: 'emailDomain', own_contact: 'ownContact' };
+  // server / widget error code -> copy key
+  const PHONE_MSG = { phone_required: 'badPhone', bad_phone: 'badPhone', phone_not_email: 'phoneNotEmail', phone_needs_number: 'phoneNeedsNumber', fake_phone: 'fakePhone', own_phone: 'ownPhone' };
+  /** +639171234567 -> 0917•••4567 (shown on "Continue as…") */
+  const maskPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); const local = d.startsWith('63') ? '0' + d.slice(2) : '+' + d; return local.slice(0, 4) + '•••' + local.slice(-4); };
   const store = {
     get(k, d) { try { return JSON.parse(localStorage.getItem('des:' + k)) ?? d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem('des:' + k, JSON.stringify(v)); } catch { } },
@@ -242,7 +235,8 @@
     const r = await fetch(apiBase + path, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-des-device': deviceId, ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body || {}) });
     if (!r.ok) {
       const e = new Error('api ' + r.status); try { e.body = await r.json(); } catch { }
-      if (r.status === 401 && path !== '/session') { token = null; store.del('token'); e.sessionGone = true; } // expired or unknown session
+      if (r.status === 401 && e.body?.error === 'phone_required') e.phoneRequired = true; // signed up before mobile numbers were required: ask for one, keep the session
+      else if (r.status === 401 && path !== '/session') { token = null; store.del('token'); e.sessionGone = true; } // expired or unknown session
       throw e;
     }
     return stream ? r : r.json();
@@ -271,18 +265,22 @@
     async session(v) { emit('session.create', { visitor: v }); return { session_id: 's_' + Date.now() }; },
     async chat(msg) { return MOCK.reply(msg, data); },
     async saveLead(l) { data.lead = { ...(data.lead || {}), ...l, updated_at: new Date().toISOString() }; emit('lead.save', { lead: data.lead }); },
-    async handoff(reason) { const h = { reason, at: new Date().toISOString(), contact: data.visitor?.contact || null }; data.handoffs.push(h); emit('handoff', h); },
+    async handoff(reason) { const h = { reason, at: new Date().toISOString(), phone: data.visitor?.phone || null }; data.handoffs.push(h); emit('handoff', h); },
     async feedback(f) { data.feedback.push({ ...f, at: new Date().toISOString() }); emit('feedback', f); },
     async end() { }
   };
   const realApi = {
     async session(v) {
       const transcript = outbox.slice(0, 40);
-      const j = await http('/session', { name: v.name, contact: v.contact, contact_type: v.contact_type, consent: v.consent, marketing_opt_in: v.marketing_opt_in, lang: S.lang, page_url: location.href, turnstile: window.__turnstileToken || null, transcript });
+      const j = await http('/session', { name: v.name, phone: v.phone, phone_type: v.phone_type, consent: v.consent, marketing_opt_in: v.marketing_opt_in, lang: S.lang, page_url: location.href, turnstile: window.__turnstileToken || null, transcript });
       outbox.length = 0; // stored with the session (anything past 40 bubbles is dropped)
       token = j.token; store.set('token', token); data.conversation.id = j.session_id; emit('session.create', { visitor: v, session_id: j.session_id }); return j;
     },
-    async resume() { try { const j = await http('/session/resume', { lang: S.lang }); token = j.token; store.set('token', token); data.conversation.id = j.session_id; return true; } catch { token = null; store.del('token'); return false; } },
+    async resume() {
+      try { const j = await http('/session/resume', { lang: S.lang }); token = j.token; store.set('token', token); data.conversation.id = j.session_id; return true; }
+      catch (e) { if (e.phoneRequired) return 'phone'; token = null; store.del('token'); return false; }
+    },
+    async addPhone(p) { return http('/session/phone', { phone: p.value, phone_type: p.type }); },
     async chat(msg, { held, prefix, signal } = {}) {
       await flushLog();
       const res = await http('/chat', { message: msg, ...(held ? { held: true, prefix } : {}) }, { stream: true, signal });
@@ -368,9 +366,10 @@
   input.placeholder = 'Type your message…';
   function updatePlaceholder() {
     if (S.busy || S.awaitChoice) return;
-    input.placeholder = S.step === 'name' ? S.t.phName : S.step === 'contact' ? S.t.phContact : S.t.phMsg;
-    input.setAttribute('inputmode', S.step === 'contact' ? 'email' : 'text');
-    input.setAttribute('autocomplete', S.step === 'name' ? 'name' : S.step === 'contact' ? 'email' : 'off');
+    const ph = S.step === 'phone' || S.step === 'phone_only';
+    input.placeholder = S.step === 'name' ? S.t.phName : ph ? S.t.phPhone : S.t.phMsg;
+    input.setAttribute('inputmode', ph ? 'tel' : 'text');
+    input.setAttribute('autocomplete', S.step === 'name' ? 'name' : ph ? 'tel' : 'off');
   }
   /** DES ended the chat (repeated off-topic / abuse): keep the composer locked. "Not you? Start over" resets. */
   function untilText(iso) {
@@ -413,7 +412,7 @@
   body.append(el('p', 'dq-chat__day', 'Today'));
 
   // ---------- state ----------
-  const S = { step: 'idle', held: null, lang: 'en', t: T.en, botAnswers: 0, surveyDone: false, surveyOpen: false, downStreak: 0, idleTimer: null, busy: false, pending: null, contactTries: 0, tmpName: null };
+  const S = { step: 'idle', held: null, lang: 'en', t: T.en, botAnswers: 0, surveyDone: false, surveyOpen: false, downStreak: 0, idleTimer: null, busy: false, pending: null, phoneTries: 0, tmpName: null };
 
   function setLang(l) { S.lang = l; S.t = T[l]; data.conversation.lang = l; }
   function setStatus() {
@@ -470,13 +469,13 @@
 
   // ---------- onboarding (scripted, no LLM) ----------
   // No name / contact within CFG.onboardTimeoutMs -> warn 1 min before, then start over (and say so).
-  const ONBOARD_STEPS = ['consent', 'name', 'contact', 'optin'];
+  const ONBOARD_STEPS = ['consent', 'name', 'phone', 'optin'];
   function clearOnboardTimer() { clearTimeout(S.obWarn); clearTimeout(S.obReset); }
   function armOnboardTimer() {
     clearOnboardTimer();
     if (!ONBOARD_STEPS.includes(S.step) || S.ended) return;
     const step = S.step;
-    S.obWarn = setTimeout(() => { if (S.step === step && !S.busy) addBot(S.t.onboardWarn(S.t.onboardWhat[step] || S.t.onboardWhat.contact), { time: false }); }, Math.max(0, CFG.onboardTimeoutMs - Math.min(60000, CFG.onboardTimeoutMs * 0.2)));
+    S.obWarn = setTimeout(() => { if (S.step === step && !S.busy) addBot(S.t.onboardWarn(S.t.onboardWhat[step] || S.t.onboardWhat.phone), { time: false }); }, Math.max(0, CFG.onboardTimeoutMs - Math.min(60000, CFG.onboardTimeoutMs * 0.2)));
     S.obReset = setTimeout(() => { if (ONBOARD_STEPS.includes(S.step) && !S.busy) { emit('onboard.timeout', { step: S.step }); reset({ notice: S.t.onboardReset }); } }, CFG.onboardTimeoutMs);
   }
   async function startOnboarding(firstMsg) {
@@ -497,39 +496,50 @@
     if (S.step === 'consent') { if (AFFIRM.test(text.trim())) return consentGiven('typed:' + text.trim().toLowerCase()); return addBot(t.notYet, { lock: true, chips: [{ label: t.agree, cls: 'is-primary', on: consentGiven }] }); }
     if (S.step === 'name') {
       const v = text.trim();
-      if (/\?|\b(how|what|magkano|paano|ano|price|do you)\b/i.test(v) && v.split(' ').length > 3) return addBot(t.nameFirst);
+      if (isQuestion(v)) { holdToo(v); return addBot(t.nameFirst); }
       const nm = checkName(v);
       if (!nm.ok) return addBot(nm.code === 'fake_name' ? t.badNameFake : t.badName);
       S.tmpName = nm.value;
-      S.step = 'contact'; updatePlaceholder(); return addBot(t.askContact(esc(S.tmpName.split(' ')[0])));
+      S.step = 'phone'; updatePlaceholder(); return addBot(t.askPhone(esc(S.tmpName.split(' ')[0])));
     }
-    if (S.step === 'contact') {
-      const c = checkContact(text);
-      if (!c.ok) return contactProblem(c.code);
-      // a personal email is accepted, but ask once for a work email (better for sales follow-up)
-      if (c.type === 'email' && !S.askedWorkEmail) {
-        S.askedWorkEmail = true; S.pendingEmail = c;
-        return addBot(t.workEmailAsk(esc(c.value)), { chips: [{ label: t.useThis(c.value), cls: 'is-primary', on: () => finishOnboarding(S.pendingEmail) }], chipsCls: 'is-inline' });
-      }
-      return finishOnboarding(c);
+    if (S.step === 'phone' || S.step === 'phone_only') {
+      const p = checkPhone(text);
+      if (!p.ok && p.code === 'bad_phone' && isQuestion(text)) { holdToo(text); return addBot(t.phoneFirst); } // a question, not a number: hold it
+      if (!p.ok) return phoneProblem(p.code);
+      return S.step === 'phone_only' ? returningPhone(p) : finishOnboarding(p);
     }
     if (S.step === 'optin') return finishOptIn(false); // free text = skip
   }
-  /** Bad contact: explain, and after 3 tries point to direct contact details. There is no way to skip. */
-  async function contactProblem(code) {
-    const t = S.t; S.contactTries++;
-    await addBot(t[CONTACT_MSG[code] || 'badContact']);
-    if (S.contactTries >= 3 && S.contactTries % 3 === 0) await addBot(t.needContact, { time: false });
+  /** A question typed instead of the name / number: answered together with the held one after sign-up. */
+  const isQuestion = (v) => /\?|\b(how|what|which|can|does|do you|magkano|paano|ano|saan|pwede|price)\b/i.test(v) && v.trim().split(/\s+/).length > 3;
+  const holdToo = (v) => { S.held = S.held ? `${S.held}\n${v}` : v; };
+  /** Bad number: explain, and after every 3 tries point to direct contact details. There is no way to skip. */
+  async function phoneProblem(code) {
+    const t = S.t; S.phoneTries++;
+    await addBot(t[PHONE_MSG[code] || 'badPhone']);
+    if (S.phoneTries >= 3 && S.phoneTries % 3 === 0) await addBot(t.needPhone, { time: false });
   }
-  async function finishOnboarding(contact) {
-    if (!contact || !contact.value) return contactProblem('contact_required');
-    if (S.step !== 'contact') return; // chip tapped twice
-    data.visitor = { name: S.tmpName, first: S.tmpName.split(' ')[0], contact: contact?.value || null, contact_type: contact?.type || null, consent: S.consent, marketing_opt_in: false, page_url: location.href, created_at: new Date().toISOString() };
+  /** Visitor from before mobile numbers were required: add one, then carry on with the same session. */
+  async function returningPhone(p) {
+    setBusy(true);
+    try { await api.addPhone(p); }
+    catch (e) { setBusy(false); const code = e.body?.error || ''; if (code === 'chat_ended') { await addBot(S.t.endedNotice(untilText(e.body?.until))); return endChat(e.body?.until); } return phoneProblem(PHONE_MSG[code] ? code : 'bad_phone'); }
+    Object.assign(data.visitor, { phone: p.value, phone_type: p.type }); store.set('visitor', { ...data.visitor, saved_at: Date.now() });
+    await realApi.resume();
+    S.step = 'done'; setStatus(); setBusy(false);
+    const held = S.held; S.held = null;
+    if (held) return answer(held, S.t.thanksGo(esc(data.visitor.first)), true);
+    return addBot(S.t.what, { chips: S.t.chips.map(l => ({ label: l, sends: true, on: (lab) => send(lab) })) });
+  }
+  async function finishOnboarding(p) {
+    if (S.step !== 'phone') return;
+    const parts = S.tmpName.split(' ');
+    data.visitor = { name: S.tmpName, first: parts[0], last: parts.slice(1).join(' ') || null, phone: p.value, phone_type: p.type, consent: S.consent, marketing_opt_in: false, page_url: location.href, created_at: new Date().toISOString() };
     if (CFG.askMarketingOptIn) { S.step = 'optin'; armOnboardTimer(); return addBot(S.t.optIn, { lock: true, chips: [{ label: S.t.optYes, cls: 'is-primary', on: () => finishOptIn(true) }, { label: S.t.optNo, cls: 'is-quiet', on: () => finishOptIn(false) }], chipsCls: 'is-inline' }); }
     return finishOptIn(false);
   }
   async function finishOptIn(yes) {
-    if (!data.visitor || !data.visitor.contact) { S.step = 'contact'; updatePlaceholder(); return contactProblem('contact_required'); }
+    if (!data.visitor || !data.visitor.phone) { S.step = 'phone'; updatePlaceholder(); return phoneProblem('phone_required'); }
     data.visitor.marketing_opt_in = !!yes;
     clearOnboardTimer();
     setBusy(true);
@@ -539,14 +549,14 @@
       setBusy(false);
       const code = e.body?.error || '';
       if (code === 'bad_name' || code === 'fake_name') { data.visitor = null; S.step = 'name'; updatePlaceholder(); return addBot(code === 'fake_name' ? S.t.badNameFake : S.t.badName); }
-      if (CONTACT_MSG[code]) { data.visitor = null; S.step = 'contact'; S.askedWorkEmail = true; updatePlaceholder(); return contactProblem(code); }
+      if (PHONE_MSG[code]) { data.visitor = null; S.step = 'phone'; updatePlaceholder(); return phoneProblem(code); }
       if (code === 'too_many_sessions') { data.visitor = null; return addBot(S.t.tooMany); }
       if (code === 'chat_ended') { data.visitor = null; await addBot(S.t.endedNotice(untilText(e.body?.until))); return endChat(e.body?.until); }
       emit('error', { message: 'session: ' + (code || e.message) });
-      data.visitor = null; S.step = 'contact'; updatePlaceholder();
+      data.visitor = null; S.step = 'phone'; updatePlaceholder();
       return addBot(S.t.trouble, { chips: [{ label: S.t.connect, cls: 'is-primary', on: () => handoff('system', 'session failed: ' + (code || e.message)) }] });
     }
-    if (j && j.contact) Object.assign(data.visitor, { name: j.name || data.visitor.name, first: j.first_name || data.visitor.first, contact: j.contact, contact_type: j.contact_type });
+    if (j && j.phone) Object.assign(data.visitor, { name: j.name || data.visitor.name, first: j.first_name || data.visitor.first, last: j.last_name ?? data.visitor.last, phone: j.phone, phone_type: j.phone_type });
     S.step = 'done';
     store.set('visitor', { ...data.visitor, saved_at: Date.now() });
     setStatus();
@@ -574,6 +584,7 @@
       armIdle();
     } catch (e) {
       emit('error', { message: String(e.message || e) });
+      if (e.phoneRequired) { setBusy(false); S.held = text; return askReturningPhone(); }
       if (e.sessionGone) { // session expired or no longer on the server: start over instead of showing an error
         setBusy(false);
         return reset({ notice: S.lang === 'fil' ? 'Nag-expire na ang session mo. Magsimula tayo ulit.' : 'Your chat session expired. Let\'s start again.' });
@@ -587,7 +598,7 @@
   }
   async function handoff(kind, reason) {
     await api.handoff(reason ? `${kind}: ${reason}` : kind);
-    await addBot(data.visitor?.contact ? S.t.handoffDone(data.visitor.contact) : S.t.handoffNoContact);
+    await addBot(data.visitor?.phone ? S.t.handoffDone(data.visitor.phone) : S.t.handoffNoContact);
     if (!S.surveyDone) { await sleep(600); survey('handoff'); }
   }
 
@@ -631,9 +642,9 @@
     if (S.step === 'idle') setLang(isFil(text) ? 'fil' : 'en');
     if (PII.test(text) && S.step === 'done') { addUser(text.replace(PII, '[redacted]')); await addBot("Please don't share card, TIN or ID numbers here — I've hidden it. How else can I help?"); return; }
     if (S.pending) { addUser(text); const p = S.pending; S.pending = null; return p(text); }
-    if (S.step === 'idle') { if (data.visitor) { S.step = 'done'; addUser(text, { log: false }); return answer(text); } addUser(text, { held: true }); return startOnboarding(text); }
+    if (S.step === 'idle') { if (data.visitor && !S.confirming) { S.step = 'done'; addUser(text, { log: false }); return answer(text); } if (S.confirming) { addUser(text, { log: false }); S.held = text; return; } addUser(text, { held: true }); return startOnboarding(text); }
     // contact details live only in the visitor record: the log gets a stand-in
-    if (S.step !== 'done') { addUser(text, { log: S.step === 'contact' ? (text.includes('@') ? '[email]' : '[phone]') : true }); return onboardingInput(text); }
+    if (S.step !== 'done') { addUser(text, { log: (S.step === 'phone' || S.step === 'phone_only') && !isQuestion(text) ? '[phone]' : true }); return onboardingInput(text); }
     if (BYE.test(text) && !S.surveyDone) { addUser(text); return survey('goodbye'); }
     addUser(text, { log: false });
     return answer(text);
@@ -645,16 +656,26 @@
     clearOnboardTimer();
     await flushLog(); outbox.length = 0; // what was already said stays with the old session
     if (banActive()) { addBot(S.t.endedNotice(untilText(banActive())), { time: false }); return endChat(banActive()); }
-    store.del('visitor'); data.visitor = null; S.step = 'idle'; S.held = null; S.ended = false; S.awaitChoice = false; root.classList.remove('is-ended'); input.disabled = false; sendBtn.disabled = false; S.surveyDone = false; S.surveyOpen = false; S.botAnswers = 0; S.contactTries = 0; S.askedWorkEmail = false; S.pendingEmail = null;
+    store.del('visitor'); data.visitor = null; S.step = 'idle'; S.held = null; S.ended = false; S.awaitChoice = false; root.classList.remove('is-ended'); input.disabled = false; sendBtn.disabled = false; S.surveyDone = false; S.surveyOpen = false; S.botAnswers = 0; S.phoneTries = 0; S.confirming = false; S.needPhone = false;
     updatePlaceholder();
     body.innerHTML = ''; body.append(el('p', 'dq-chat__day', 'Today')); setStatus(); emit('reset', {});
     if (opts.notice) await addBot(opts.notice, { time: false });
     greet();
   }
+  async function askReturningPhone() { S.needPhone = false; S.step = 'phone_only'; updatePlaceholder(); await addBot(S.t.needPhoneReturning(esc(data.visitor.first))); }
   async function greet() {
     const t = S.t;
     if (banActive()) { await addBot(t.endedNotice(untilText(banActive())), { time: false }); return endChat(banActive()); }
-    if (data.visitor) { S.step = 'done'; await addBot(t.welcomeBack(data.visitor.first), { chips: t.chips.map(l => ({ label: l, sends: true, on: (lab) => send(lab) })) }); return; }
+    if (data.visitor && S.needPhone) return askReturningPhone();
+    if (data.visitor) {
+      // same device within 30 days: one tap instead of signing up again; "Not me" runs the full sign-up
+      S.confirming = true;
+      await addBot(t.continueAs(esc(data.visitor.name || data.visitor.first), maskPhone(data.visitor.phone)), { lock: true, chipsCls: 'is-inline', chips: [
+        { label: t.itsMe, cls: 'is-primary', on: async () => { S.confirming = false; S.step = 'done'; const held = S.held; S.held = null;
+          if (held) return answer(held); await addBot(t.what, { chips: t.chips.map(l => ({ label: l, sends: true, on: (lab) => send(lab) })) }); } },
+        { label: t.notMe, cls: 'is-quiet', on: async () => { S.confirming = false; const held = S.held; await reset(); if (held) startOnboarding(held); } }] });
+      return;
+    }
     await addBot(t.hello, { time: false });
     await addBot(t.what, { chips: t.chips.map(l => ({ label: l, sends: true, on: (lab) => send(lab) })) });
   }
@@ -670,9 +691,9 @@
   const saved = store.get('visitor');
   if (saved && Date.now() - saved.saved_at < CFG.rememberDays * 864e5 && saved.consent?.version === CFG.consentVersion) {
     data.visitor = saved;
-    if (apiBase && token && !(await realApi.resume())) { data.visitor = null; store.del('visitor'); } // token expired → onboard again
-    if (apiBase && !token) { data.visitor = null; store.del('visitor'); }
-    if (data.visitor && !data.visitor.contact) { data.visitor = null; store.del('visitor'); token = null; store.del('token'); } // older visitors who skipped the contact step
+    const resumed = apiBase && token ? await realApi.resume() : false;
+    if (resumed === 'phone') S.needPhone = true; // signed up before mobile numbers were required: ask for one first
+    else if (apiBase && !resumed) { data.visitor = null; store.del('visitor'); } // token expired or missing → sign up again
   }
   setStatus();
   let greeted = false;

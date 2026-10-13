@@ -15,6 +15,8 @@ export const adminRouter = Router();
 const GENERAL = 'General'; // approved answers / questions not tied to one product
 const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'closed'];
 
+// conversations of the same person as visitor $2: same visitor row, same phone (person_key), or same email on another sign-up
+const SAME_PERSON = `(c.visitor_id = $2 or exists (select 1 from visitors me where me.id = $2 and ((me.person_key is not null and v.person_key = me.person_key) or (me.email_hash is not null and v.email_hash = me.email_hash))))`;
 const MSG_COLS = 'id, seq, role, kind, source, content, original_content, incomplete, delivered, tool_name, tool_input, blocked_reason, product, golden_ids, tokens_in, tokens_out, created_at';
 adminRouter.use((req, res, next) => {
   const tok = (req.headers.authorization || '').replace(/^Bearer /, '');
@@ -103,7 +105,7 @@ adminRouter.get('/conversations', wrap(async (req, res) => {
   const limit = Math.min(200, parseInt(req.query.limit, 10) || 50);
   const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
   const rows = (await q(`
-    select c.id, c.started_at, c.ended_at, c.status, c.lang, c.turns, c.summary, v.name, v.contact, v.contact_type,
+    select c.id, c.started_at, c.ended_at, c.status, c.lang, c.turns, c.summary, v.name, v.phone, v.phone_type, v.email, v.email_type,
       (select m.content from messages m where m.conversation_id=c.id and m.role='user' and m.kind='chat' order by m.seq, m.id limit 1) first_question,
       (select array_agg(distinct m.product) from messages m where m.conversation_id=c.id and m.product is not null) products,
       exists(select 1 from leads l where l.conversation_id=c.id) has_lead,
@@ -123,11 +125,11 @@ adminRouter.get('/conversations', wrap(async (req, res) => {
       and ($2::text is null or v.name ilike $2 or exists(select 1 from messages m where m.conversation_id=c.id and m.content ilike $2))
       and ($3::text is null or exists(select 1 from messages m where m.conversation_id=c.id and m.product=$3))`, [status, search_, product, req.query.all === '1'])).rows[0].n;
   res.set('x-total-count', String(total)).set('access-control-expose-headers', 'x-total-count');
-  res.json(rows.map((x) => ({ ...x, contact: decrypt(x.contact) })));
+  res.json(rows.map((x) => ({ ...x, phone: decrypt(x.phone), email: decrypt(x.email) })));
 }));
 
 adminRouter.get('/conversations/:id/detail', wrap(async (req, res) => {
-  const conv = (await q(`select c.*, v.name, v.contact, v.contact_type, v.marketing_opt_in, v.first_page_url from conversations c join visitors v on v.id=c.visitor_id where c.id=$1`, [req.params.id])).rows[0];
+  const conv = (await q(`select c.*, v.name, v.phone, v.phone_type, v.email, v.email_type, v.marketing_opt_in, v.first_page_url from conversations c join visitors v on v.id=c.visitor_id where c.id=$1`, [req.params.id])).rows[0];
   if (!conv) return res.status(404).json({ error: 'not_found' });
   const messages = (await q(`select ${MSG_COLS} from messages where conversation_id=$1 order by seq, id`, [req.params.id])).rows;
   const ids = [...new Set(messages.flatMap((m) => m.golden_ids || []).map(Number))];
@@ -136,16 +138,16 @@ adminRouter.get('/conversations/:id/detail', wrap(async (req, res) => {
   const lead = (await q('select * from leads where conversation_id=$1', [req.params.id])).rows[0] || null;
   const handoffs = (await q('select * from handoffs where conversation_id=$1 order by id', [req.params.id])).rows;
   const others = (await q(`select count(*)::int n from conversations c join visitors v on v.id=c.visitor_id
-                           where c.id <> $1 and (c.visitor_id = $2 or (v.person_key is not null and v.person_key = (select person_key from visitors where id=$2)))`, [req.params.id, conv.visitor_id])).rows[0].n;
-  res.json({ ...conv, contact: decrypt(conv.contact), messages, golden, feedback, lead, handoffs, other_conversations: others });
+                           where c.id <> $1 and ${SAME_PERSON}`, [req.params.id, conv.visitor_id])).rows[0].n;
+  res.json({ ...conv, phone: decrypt(conv.phone), email: decrypt(conv.email), messages, golden, feedback, lead, handoffs, other_conversations: others });
 }));
 
 // Everything the same person said across visits and sign-ups (same visitor, or same contact on a new sign-up), oldest first.
 adminRouter.get('/conversations/:id/history', wrap(async (req, res) => {
-  const me = (await q('select v.id, v.person_key, v.name from conversations c join visitors v on v.id=c.visitor_id where c.id=$1', [req.params.id])).rows[0];
+  const me = (await q('select v.id, v.name from conversations c join visitors v on v.id=c.visitor_id where c.id=$1', [req.params.id])).rows[0];
   if (!me) return res.status(404).json({ error: 'not_found' });
   const convs = (await q(`select c.id, c.started_at, c.ended_at, c.status, c.summary, v.name from conversations c join visitors v on v.id=c.visitor_id
-                          where c.visitor_id = $1 or ($2::text is not null and v.person_key = $2) order by c.started_at`, [me.id, me.person_key])).rows;
+                          where ${SAME_PERSON.replace(/\$2/g, '$1')} order by c.started_at`, [me.id])).rows;
   const msgs = convs.length ? (await q(`select conversation_id, ${MSG_COLS} from messages where conversation_id = any($1::uuid[]) order by seq, id`, [convs.map((c) => c.id)])).rows : [];
   res.json({ name: me.name, conversations: convs.map((c) => ({ ...c, messages: msgs.filter((m) => m.conversation_id === c.id) })) });
 }));

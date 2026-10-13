@@ -62,7 +62,7 @@ export function filterOutput(text, { systemPrompt = '', visitorContact = '' } = 
   const reasons = [];
   if (PRICE.some((re) => re.test(text))) reasons.push('price');
   if (CLAIMS.some((re) => re.test(text))) reasons.push('claim');
-  if (visitorContact && text.includes(visitorContact)) reasons.push('contact_echo');
+  if ([].concat(visitorContact || []).some((c) => c && text.includes(c))) reasons.push('contact_echo'); // phone and/or email
   if (systemPrompt && text.length > 200 && systemPrompt.includes(text.slice(0, 200))) reasons.push('prompt_leak');
 
   // links: strip anything not on the allow-list

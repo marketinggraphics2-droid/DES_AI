@@ -224,3 +224,23 @@ update messages m set seq = x.rn from (select id, row_number() over (partition b
 update conversations c set last_seq = x.mx from (select conversation_id, max(seq) mx from messages group by conversation_id) x where x.conversation_id = c.id and coalesce(c.last_seq, 0) < x.mx;
 update conversations c set last_activity_at = coalesce((select max(created_at) from messages m where m.conversation_id = c.id), c.started_at) where c.last_activity_at is null;
 update visitors set person_key = contact_hash where person_key is null and contact_hash is not null;
+
+-- ---- phone required, email optional (2026-10-13) ----
+-- contact / contact_hash / contact_type stay for older code paths and history; new sign-ups fill both sets
+alter table visitors add column if not exists phone text;          -- encrypted when PII_ENCRYPTION_KEY is set
+alter table visitors add column if not exists phone_hash text;     -- HMAC blind index (rate limits, bans, same-person link)
+alter table visitors add column if not exists phone_type text;     -- mobile | landline | viber | whatsapp | wechat | telegram | signal | line
+alter table visitors add column if not exists email text;          -- optional, encrypted when PII_ENCRYPTION_KEY is set
+alter table visitors add column if not exists email_hash text;
+alter table visitors add column if not exists email_type text;     -- work_email | email
+create index if not exists visitors_phone_hash_idx on visitors(phone_hash);
+-- backfill from the single contact field (same key + same HMAC, so the stored values can be copied as they are)
+update visitors set phone = contact, phone_hash = contact_hash, phone_type = contact_type
+  where phone is null and contact is not null and contact_type in ('mobile','landline','viber','whatsapp','wechat','telegram','signal','line');
+update visitors set email = contact, email_hash = contact_hash, email_type = contact_type
+  where email is null and contact is not null and contact_type in ('email','work_email');
+update visitors set person_key = phone_hash where phone_hash is not null and person_key is distinct from phone_hash;
+-- full name split at sign-up; one word = first name only (the demo form asks for the last name later)
+alter table visitors add column if not exists first_name text;
+alter table visitors add column if not exists last_name text;
+update visitors set first_name = split_part(name, ' ', 1), last_name = nullif(substr(name, length(split_part(name, ' ', 1)) + 2), '') where first_name is null;

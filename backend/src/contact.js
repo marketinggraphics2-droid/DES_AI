@@ -1,6 +1,6 @@
-// Name + contact validation for onboarding. The server is the gate: the widget mirrors the quick checks
+// Name + phone + email validation for onboarding. The server is the gate: the widget mirrors the quick checks
 // for instant feedback, but a session is only created when these pass.
-// Contact = email (work email preferred) or a phone number usable for a call, SMS, Viber, WhatsApp, WeChat, Telegram…
+// Phone is required (a number usable for a call, SMS, Viber, WhatsApp…); email is optional (work email preferred).
 import dns from 'node:dns/promises';
 
 const FREE_EMAIL = new Set(('gmail.com googlemail.com yahoo.com yahoo.com.ph ymail.com rocketmail.com outlook.com outlook.ph hotmail.com hotmail.ph ' +
@@ -62,7 +62,9 @@ function parsePhone(raw) {
   const s = String(raw ?? '');
   const platform = (PLATFORM.find(([re]) => re.test(s)) || [])[1] || null;
   const stripped = s.replace(PHONE_WORDS, ' ').replace(/[\s().\-–/]/g, '');
-  if (!/^\+?\d+$/.test(stripped)) return null;
+  // "telegram @juan", "line: juan_dc": a username, not a number we can call
+  if (platform && (s.match(/\d/g) || []).length < 7) return { error: 'phone_needs_number' };
+  if (!/^\+?\d+$/.test(stripped)) return { error: 'bad_phone' };
   let d = stripped.replace(/^\+/, '');
   const intl = stripped.startsWith('+') || stripped.startsWith('00');
   if (stripped.startsWith('00')) d = d.slice(2);
@@ -71,8 +73,8 @@ function parsePhone(raw) {
   else if (!intl && /^0[2-8]\d{7,8}$/.test(d)) { value = '+63' + d.slice(1); type = 'landline'; }             // PH landline, e.g. 02 8365 0228
   else if (/^63[2-8]\d{7,8}$/.test(d)) { value = '+' + d; type = 'landline'; }
   else if (intl && /^[1-9]\d{7,14}$/.test(d)) { value = '+' + d; type = platform || 'mobile'; }              // other countries, with country code
-  else return { error: 'bad_contact' };
-  if (fakeDigits(value.replace(/^\+(63)?/, ''))) return { error: 'fake_contact' };
+  else return { error: 'bad_phone' };
+  if (fakeDigits(value.replace(/^\+(63)?/, ''))) return { error: 'fake_phone' };
   return { value, type };
 }
 
@@ -82,11 +84,11 @@ function parseEmail(raw) {
   const s = String(raw ?? '').trim().toLowerCase().replace(/^(e-?mail|email address|my email is|mail)\s*[:\-]?\s*/i, '');
   if (!s.includes('@')) return null;
   const m = s.match(EMAIL_RE);
-  if (!m || s.includes('..')) return { error: 'bad_contact' };
+  if (!m || s.includes('..')) return { error: 'bad_email' };
   const [, local, domain] = m;
   if (DISPOSABLE.has(domain) || [...DISPOSABLE].some((d) => domain.endsWith('.' + d))) return { error: 'disposable_email' };
-  if (PLACEHOLDER_DOMAIN.has(domain) || RESERVED_TLD.test(domain) || /^(test|example|sample|fake|asdf)\./.test(domain)) return { error: 'fake_contact' };
-  if (FAKE_LOCAL.test(local)) return { error: 'fake_contact' };
+  if (PLACEHOLDER_DOMAIN.has(domain) || RESERVED_TLD.test(domain) || /^(test|example|sample|fake|asdf)\./.test(domain)) return { error: 'fake_email' };
+  if (FAKE_LOCAL.test(local)) return { error: 'fake_email' };
   return { value: s, type: FREE_EMAIL.has(domain) ? 'email' : 'work_email', domain };
 }
 
@@ -100,22 +102,31 @@ async function domainReceivesMail(domain) {
 }
 
 /**
- * @returns {Promise<{ok:true, value:string, type:string} | {ok:false, code:string}>}
- * types: work_email | email | mobile | landline | viber | whatsapp | wechat | telegram | signal | line
- * codes: contact_required | bad_contact | fake_contact | disposable_email | email_domain
+ * Required phone number.
+ * @returns {{ok:true, value:string, type:string} | {ok:false, code:string}}
+ * types: mobile | landline | viber | whatsapp | wechat | telegram | signal | line (the label the visitor gave the number)
+ * codes: phone_required | phone_not_email | phone_needs_number | bad_phone | fake_phone
  */
-export async function validateContact(raw, { checkDns = true } = {}) {
-  if (raw == null || !String(raw).trim()) return { ok: false, code: 'contact_required' };
-  const e = parseEmail(raw);
-  if (e) {
-    if (e.error) return { ok: false, code: e.error };
-    if (checkDns && !FREE_EMAIL.has(e.domain) && !(await domainReceivesMail(e.domain))) return { ok: false, code: 'email_domain' };
-    return { ok: true, value: e.value, type: e.type };
-  }
+export function validatePhone(raw) {
+  if (raw == null || !String(raw).trim()) return { ok: false, code: 'phone_required' };
+  const named = PLATFORM.some(([re]) => re.test(String(raw)));
+  if (!named && String(raw).includes('@') && !/\d{7}/.test(String(raw).replace(/\D/g, ''))) return { ok: false, code: 'phone_not_email' };
   const p = parsePhone(raw);
-  if (!p) return { ok: false, code: 'bad_contact' };
   if (p.error) return { ok: false, code: p.error };
   return { ok: true, value: p.value, type: p.type };
+}
+
+/**
+ * Optional email: empty is fine ({ok:true, value:null}).
+ * @returns {Promise<{ok:true, value:string|null, type:'work_email'|'email'|null} | {ok:false, code:string}>}
+ * codes: bad_email | fake_email | disposable_email | email_domain
+ */
+export async function validateEmail(raw, { checkDns = true } = {}) {
+  if (raw == null || !String(raw).trim()) return { ok: true, value: null, type: null };
+  const e = parseEmail(raw) || { error: 'bad_email' };
+  if (e.error) return { ok: false, code: e.error };
+  if (checkDns && !FREE_EMAIL.has(e.domain) && !(await domainReceivesMail(e.domain))) return { ok: false, code: 'email_domain' };
+  return { ok: true, value: e.value, type: e.type };
 }
 
 export const isFreeEmailDomain = (d) => FREE_EMAIL.has(String(d || '').toLowerCase());

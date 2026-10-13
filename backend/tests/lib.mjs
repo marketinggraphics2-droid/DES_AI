@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM, VirtualConsole } from 'jsdom';
+import { validatePhone } from '../src/contact.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -66,6 +67,9 @@ export async function stopServer(base, proc) {
 let n = 0;
 export function ident() { n++; return { ip: `198.18.${Math.floor(n / 250)}.${(n % 250) + 1}`, dev: `test-device-${process.pid}-${n}`.padEnd(20, 'x') }; }
 export const uniqueEmail = (tag = 'qa') => `${tag}.t${Date.now().toString(36)}${n}@dynamiqes.com`;
+/** A valid, not-yet-used PH mobile number (rate limits count per number). */
+const usedPhones = new Set();
+export function uniquePhone(prefix = '0917') { for (;;) { const p = prefix + String(Math.floor(Math.random() * 1e7)).padStart(7, '0'); if (!usedPhones.has(p) && validatePhone(p).ok) { usedPhones.add(p); return p; } } }
 
 // ---------------- HTTP ----------------
 export function api(base) {
@@ -86,7 +90,7 @@ export function api(base) {
     const events = text.split('\n\n').map((b) => ({ ev: b.match(/^event: (.*)$/m)?.[1], data: b.match(/^data: (.*)$/m)?.[1] })).filter((x) => x.ev).map((x) => ({ ev: x.ev, data: JSON.parse(x.data) }));
     return { status: r.status, events, done: events.find((e) => e.ev === 'done')?.data || null, error: events.find((e) => e.ev === 'error')?.data || null, types: events.filter((e) => e.ev === 'event').map((e) => e.data.type) };
   }
-  const person = (o = {}) => ({ name: 'Ana Reyes', contact: uniqueEmail(), consent: { version: '2026-10-01', method: 'chip' }, marketing_opt_in: false, lang: 'en', page_url: 'http://test/', ...o });
+  const person = (o = {}) => ({ name: 'Ana Reyes', phone: uniquePhone(), consent: { version: '2026-10-01', method: 'chip' }, marketing_opt_in: false, lang: 'en', page_url: 'http://test/', ...o });
   async function session(id, o = {}) { const r = await req('POST', '/api/session', { body: person(o), id }); return { ...r, token: r.json?.token }; }
   return { req, chat, person, session };
 }

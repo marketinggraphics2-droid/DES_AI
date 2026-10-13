@@ -8,7 +8,7 @@ import { stablePrompt, buildContext, invalidatePrompt } from './prompt.js';
 import { answer, summarize, classifyLLM } from './llm.js';
 import { maskPII, injectionScore, classify, detectLang, filterOutput, CANNED, MAX_INPUT_CHARS } from './guardrails.js';
 import { handoff } from './tools.js';
-import { validateName, validateContact } from './contact.js';
+import { validateName, validatePhone, validateEmail } from './contact.js';
 import { ingestUrl, sweepSitemap } from './ingest.js';
 import { addMessage, serialize, maskWidgetText } from './log.js';
 
@@ -20,8 +20,8 @@ const deviceId = (req) => { const d = String(req.headers['x-des-device'] || '');
 
 // ---- ban after a chat is ended for repeated off-topic / abuse ----
 // Stored as rate_events(kind='ended') on every identity we have; any one of them blocks new chats until it expires.
-const banKeys = (req, { vid = null, contactHash = null } = {}) => [
-  'ip:' + ipHash(req), deviceId(req) && 'device:' + deviceId(req), vid && 'visitor:' + vid, contactHash && 'contact:' + contactHash,
+const banKeys = (req, { vid = null, phoneHash = null, emailHash = null } = {}) => [
+  'ip:' + ipHash(req), deviceId(req) && 'device:' + deviceId(req), vid && 'visitor:' + vid, phoneHash && 'contact:' + phoneHash, emailHash && 'contact:' + emailHash,
 ].filter(Boolean);
 const banHours = (bucket) => (bucket.startsWith('ip:') ? cfg.chatBanIpHours : cfg.chatBanHours);
 /** Latest expiry across the given identities (device / visitor / contact: CHAT_BAN_HOURS, connection: CHAT_BAN_IP_HOURS), or null. */
@@ -42,10 +42,11 @@ async function auth(req, res, next) {
   let s;
   try { s = jwt.verify(tok, cfg.jwtSecret); } catch { return res.status(401).json({ error: 'invalid_session' }); }
   try {
-    const v = await q('select contact from visitors where id=$1', [s.vid]);
+    const v = await q('select phone from visitors where id=$1', [s.vid]);
     if (!v.rows.length) return res.status(401).json({ error: 'session_gone' });
-    if (!v.rows[0].contact) return res.status(401).json({ error: 'contact_required' }); // older sessions that skipped the contact step
-    if (req.path !== '/session/resume') {
+    // a phone number is required to chat; visitors from before that rule add one first (POST /session/phone)
+    if (!v.rows[0].phone && req.path !== '/session/phone') return res.status(401).json({ error: 'phone_required', first_name: s.first });
+    if (!['/session/resume', '/session/phone'].includes(req.path)) {
       const c = await q('select 1 from conversations where id=$1 and visitor_id=$2', [s.cid, s.vid]);
       if (!c.rows.length) return res.status(401).json({ error: 'session_gone' });
     }
@@ -81,31 +82,36 @@ r.get('/ban', async (req, res) => {
 });
 
 r.post('/session', async (req, res) => {
-  const { name, contact, consent, marketing_opt_in, lang, page_url, turnstile, transcript } = req.body || {};
+  const { name, consent, marketing_opt_in, lang, page_url, turnstile, transcript } = req.body || {};
+  const phoneRaw = req.body?.phone ?? (req.body?.email == null ? req.body?.contact : null); // `contact`: widgets cached from before this change
   const ip = ipHash(req);
   if (await isBlocked('ip:' + ip)) return res.status(429).json({ error: 'blocked' });
   if (!(await verifyTurnstile(turnstile, req.ip))) return res.status(400).json({ error: 'turnstile_failed' });
-  // name + contact are both required; the widget checks too, but this is the gate
+  // name + mobile number are required before the AI; email is optional (the widget asks for it only in the demo / handoff form)
   const nm = validateName(name);
   if (!nm.ok) return res.status(400).json({ error: nm.code });
   if (!consent || consent.version !== cfg.consentVersion) return res.status(400).json({ error: 'consent_required', consent_version: cfg.consentVersion });
-  const ct = await validateContact(contact);
-  if (!ct.ok) return res.status(400).json({ error: ct.code });
-  if (isOwnContact(ct.value, await ownContacts())) return res.status(400).json({ error: 'own_contact' });
-  const c = ct.value;
-  // the widget sends the cleaned number plus the platform it saw ("viber: 0917…"); keep that label
-  const ctype = ct.type === 'mobile' && ['viber', 'whatsapp', 'wechat', 'telegram', 'signal', 'line'].includes(req.body?.contact_type) ? req.body.contact_type : ct.type;
+  const own = await ownContacts();
+  const ph = await checkPhone(phoneRaw, req.body?.phone_type ?? req.body?.contact_type, own);
+  if (!ph.ok) return res.status(400).json({ error: ph.code, field: 'phone' });
+  const em = await validateEmail(req.body?.email);
+  if (!em.ok) return res.status(400).json({ error: em.code, field: 'email' });
+  if (em.value && isOwnContact(em.value, own)) return res.status(400).json({ error: 'own_email', field: 'email' });
+  const phoneHash = hmac(ph.value), emailHash = em.value ? hmac(em.value) : null;
   const cleanName = nm.value;
-  const sessionBan = await banUntil(banKeys(req, { contactHash: hmac(c) }));
+  const sessionBan = await banUntil(banKeys(req, { phoneHash, emailHash }));
   if (sessionBan) return res.status(403).json({ error: 'chat_ended', until: sessionBan });
   if ((await count('ip:' + ip, 'session', 86400)) >= cfg.rate.sessionsPerIpDay) return res.status(429).json({ error: 'too_many_sessions' });
-  if ((await count('contact:' + hmac(c), 'session', 86400)) >= cfg.rate.sessionsPerContactDay) return res.status(429).json({ error: 'too_many_sessions' });
+  for (const h of [phoneHash, emailHash].filter(Boolean)) if ((await count('contact:' + h, 'session', 86400)) >= cfg.rate.sessionsPerContactDay) return res.status(429).json({ error: 'too_many_sessions' });
 
-  const v = await q(`insert into visitors(name, contact, contact_hash, contact_type, consent_at, consent_version, consent_method, marketing_opt_in, lang, first_page_url, ip_hash, person_key)
-                     values($1,$2,$3,$4,now(),$5,$6,$7,$8,$9,$10,$3) returning id`,
-    [cleanName, encrypt(c), hmac(c), ctype, consent.version, consent.method || 'chip', !!marketing_opt_in, lang === 'fil' ? 'fil' : 'en', (page_url || '').slice(0, 500), ip]);
+  // contact / contact_hash / contact_type mirror the phone for older code paths and reports
+  const [firstName, ...rest] = cleanName.split(' '); const lastName = rest.join(' ') || null; // one word: first name only
+  const v = await q(`insert into visitors(name, first_name, last_name, phone, phone_hash, phone_type, email, email_hash, email_type, contact, contact_hash, contact_type,
+                     consent_at, consent_version, consent_method, marketing_opt_in, lang, first_page_url, ip_hash, person_key)
+                     values($1,$14,$15,$2,$3,$4,$5,$6,$7,$2,$3,$4,now(),$8,$9,$10,$11,$12,$13,$3) returning id`,
+    [cleanName, encrypt(ph.value), phoneHash, ph.type, em.value ? encrypt(em.value) : null, emailHash, em.type, consent.version, consent.method || 'chip', !!marketing_opt_in, lang === 'fil' ? 'fil' : 'en', (page_url || '').slice(0, 500), ip, firstName, lastName]);
   const conv = await q('insert into conversations(visitor_id, lang) values($1,$2) returning id', [v.rows[0].id, lang === 'fil' ? 'fil' : 'en']);
-  await hit('ip:' + ip, 'session'); await hit('contact:' + hmac(c), 'session');
+  await hit('ip:' + ip, 'session'); for (const h of [phoneHash, emailHash].filter(Boolean)) await hit('contact:' + h, 'session');
   // what the visitor saw and typed before the session existed (greeting, sign-up), so the dashboard has the whole chat
   if (Array.isArray(transcript)) {
     const keep = await ownContacts();
@@ -118,7 +124,27 @@ r.post('/session', async (req, res) => {
 
   const first = cleanName.split(/\s+/)[0];
   const token = jwt.sign({ vid: v.rows[0].id, cid: conv.rows[0].id, first }, cfg.jwtSecret, { expiresIn: '2h' });
-  res.json({ session_id: conv.rows[0].id, token, first_name: first, name: cleanName, contact: c, contact_type: ctype });
+  res.json({ session_id: conv.rows[0].id, token, first_name: first, last_name: lastName, name: cleanName, phone: ph.value, phone_type: ph.type, email: em.value, email_type: em.type });
+});
+
+/** Phone checks shared by sign-up and /session/phone. The widget sends the platform it saw ("viber: 0917…"); keep that label. */
+async function checkPhone(raw, label, own) {
+  const p = validatePhone(raw);
+  if (!p.ok) return p;
+  if (isOwnContact(p.value, own)) return { ok: false, code: 'own_phone' };
+  const type = p.type === 'mobile' && ['viber', 'whatsapp', 'wechat', 'telegram', 'signal', 'line'].includes(label) ? label : p.type;
+  return { ok: true, value: p.value, type };
+}
+
+// returning visitor from before phone numbers were required: add one, keep everything else
+r.post('/session/phone', auth, async (req, res) => {
+  const ph = await checkPhone(req.body?.phone, req.body?.phone_type, await ownContacts());
+  if (!ph.ok) return res.status(400).json({ error: ph.code, field: 'phone' });
+  const phoneHash = hmac(ph.value);
+  const ban = await banUntil(banKeys(req, { vid: req.session.vid, phoneHash }));
+  if (ban) return res.status(403).json({ error: 'chat_ended', until: ban });
+  await q(`update visitors set phone=$2, phone_hash=$3, phone_type=$4, person_key=$3 where id=$1`, [req.session.vid, encrypt(ph.value), phoneHash, ph.type]);
+  res.json({ ok: true, phone: ph.value, phone_type: ph.type });
 });
 
 // returning visitor: continue the recent conversation (same visit), or start a new one for the same visitor
@@ -173,7 +199,8 @@ async function chatTurn(req, res, ac, isGone) {
   const storeUser = async (text, product = null) => {
     if (held) {
       const h = (await q(`select id from messages where conversation_id=$1 and role='user' and held order by seq desc limit 1`, [cid])).rows[0];
-      if (h) { await q('update messages set held=false, product=$2 where id=$1', [h.id, product]); userRowId = Number(h.id); }
+      // the widget may have added questions typed during sign-up to the held one: store what the AI is answering
+      if (h) { await q('update messages set held=false, product=$2, content=$3 where id=$1', [h.id, product, text]); userRowId = Number(h.id); }
     }
     if (!userRowId) userRowId = (await addMessage(cid, { role: 'user', content: text, product })).id;
     await q('update conversations set turns = turns + 1 where id=$1', [cid]);
@@ -196,8 +223,8 @@ async function chatTurn(req, res, ac, isGone) {
     const n = prior + 1;
     if (n >= cfg.chatStrikesMax) {
       await q(`update conversations set status='ended', ended_at=now(), summary=coalesce(summary, 'Ended by DES: repeated off-topic or abusive messages') where id=$1`, [cid]);
-      const v = (await q('select contact_hash from visitors where id=$1', [vid])).rows[0];
-      await banIdentity(banKeys(req, { vid, contactHash: v?.contact_hash }));
+      const v = (await q('select phone_hash, email_hash from visitors where id=$1', [vid])).rows[0];
+      await banIdentity(banKeys(req, { vid, phoneHash: v?.phone_hash, emailHash: v?.email_hash }));
       const until = await banUntil(banKeys(req, { vid }));
       send('event', { type: 'ended', until }); send('text', { delta: C.ended });
       return finish(C.ended, { blocked: kind, lang, ended: true, until });
@@ -272,8 +299,8 @@ async function chatTurn(req, res, ac, isGone) {
     if (hooks.append) { out.text += hooks.append; streamed += hooks.append; send('text', { delta: hooks.append }); }
 
     // output guardrails
-    const visitorContact = decrypt((await q('select contact from visitors where id=$1', [vid])).rows[0]?.contact) || '';
-    let { text, reasons } = filterOutput(out.text, { systemPrompt: system, visitorContact });
+    const vc = (await q('select phone, email from visitors where id=$1', [vid])).rows[0] || {};
+    let { text, reasons } = filterOutput(out.text, { systemPrompt: system, visitorContact: [decrypt(vc.phone), decrypt(vc.email)].filter(Boolean) });
     let blocked = null;
     if (reasons.includes('price')) { text = C.price; blocked = 'price'; }
     else if (reasons.length) { text = C.trouble; blocked = reasons.join(','); }
@@ -334,16 +361,16 @@ r.post('/ingest/webhook', async (req, res) => {
 
 // ---------- admin (temporary bearer token; replace with Google SSO) ----------
 r.get('/admin/leads', admin, async (req, res) => {
-  const rows = (await q(`select l.*, v.name, v.contact, v.contact_type, v.marketing_opt_in, c.summary, c.status as conv_status, c.started_at
+  const rows = (await q(`select l.*, v.name, v.phone, v.phone_type, v.email, v.email_type, v.marketing_opt_in, c.summary, c.status as conv_status, c.started_at
                          from leads l join visitors v on v.id=l.visitor_id left join conversations c on c.id=l.conversation_id order by l.updated_at desc limit 500`)).rows;
-  res.json(rows.map((x) => ({ ...x, contact: decrypt(x.contact) })));
+  res.json(rows.map((x) => ({ ...x, phone: decrypt(x.phone), email: decrypt(x.email) })));
 });
 r.get('/admin/conversations/:id', admin, async (req, res) => {
-  const conv = (await q(`select c.*, v.name, v.contact, v.contact_type from conversations c join visitors v on v.id=c.visitor_id where c.id=$1`, [req.params.id])).rows[0];
+  const conv = (await q(`select c.*, v.name, v.phone, v.phone_type, v.email, v.email_type from conversations c join visitors v on v.id=c.visitor_id where c.id=$1`, [req.params.id])).rows[0];
   if (!conv) return res.status(404).end();
   const messages = (await q('select id, role, content, tool_name, tool_input, blocked_reason, tokens_in, tokens_out, created_at from messages where conversation_id=$1 order by seq, id', [req.params.id])).rows;
   const feedback = (await q('select * from feedback where conversation_id=$1 order by id', [req.params.id])).rows;
-  res.json({ ...conv, contact: decrypt(conv.contact), messages, feedback });
+  res.json({ ...conv, phone: decrypt(conv.phone), email: decrypt(conv.email), messages, feedback });
 });
 r.get('/admin/feedback/summary', admin, async (_req, res) => {
   const s = (await q(`select count(*) filter (where kind='survey' and not dismissed)::int surveys, round(avg(rating) filter (where kind='survey'),2) avg_rating,
@@ -371,12 +398,13 @@ r.get('/admin/export/finetune.jsonl', admin, async (_req, res) => {
   res.end();
 });
 r.get('/admin/export/leads.csv', admin, async (_req, res) => {
-  const rows = (await q(`select l.created_at, v.name, v.contact, v.contact_type, l.company, l.industry, l.team_size, l.current_system, l.need, array_to_string(l.product_interest, '; ') products, l.demo_requested, l.status, v.marketing_opt_in, l.conversation_id
+  const rows = (await q(`select l.created_at, v.name, v.phone, v.phone_type, v.email, v.email_type, l.company, l.industry, l.team_size, l.current_system, l.need, array_to_string(l.product_interest, '; ') products, l.demo_requested, l.status, v.marketing_opt_in, l.conversation_id
                          from leads l join visitors v on v.id=l.visitor_id order by l.created_at desc`)).rows;
   res.setHeader('content-type', 'text/csv'); res.setHeader('content-disposition', 'attachment; filename=des-leads.csv');
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  res.write(Object.keys(rows[0] || { created_at: 1 }).join(',') + '\n');
-  for (const x of rows) res.write(Object.values({ ...x, contact: decrypt(x.contact) }).map(esc).join(',') + '\n');
+  const cols = ['created_at', 'name', 'phone', 'phone_type', 'email', 'email_type', 'company', 'industry', 'team_size', 'current_system', 'need', 'products', 'demo_requested', 'status', 'marketing_opt_in', 'conversation_id'];
+  res.write(cols.join(',') + '\n');
+  for (const x of rows) { const y = { ...x, phone: decrypt(x.phone), email: decrypt(x.email) }; res.write(cols.map((k) => esc(y[k])).join(',') + '\n'); }
   res.end();
 });
 r.post('/admin/ingest', admin, async (req, res) => { const url = req.body?.url; if (url) { res.json(await ingestUrl(url, { source: 'manual' })); } else { res.json({ started: true }); sweepSitemap().catch(console.error); } });
