@@ -1013,7 +1013,7 @@
   }
 
   // ---------------- users (superuser) ----------------
-  const ROLE_OPTS = [['user', 'User · reads chats and leads, contacts masked'], ['admin', 'Admin · also answers, knowledge, exports, share links'], ['superuser', 'Superuser · everything incl. users, instructions, audit']];
+  const ROLE_OPTS = [['user', 'User · chats and leads (with contact details), remarks; no exports'], ['admin', 'Admin · also answers, knowledge, exports, share links'], ['superuser', 'Superuser · everything incl. users, instructions, audit']];
   async function pageUsers() {
     loading();
     let users; try { users = await api('/admin/users'); } catch (e) { return fail(e); }

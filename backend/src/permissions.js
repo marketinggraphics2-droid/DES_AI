@@ -12,7 +12,7 @@ const SUPER = ['superuser'];
 export const PERMISSIONS = {
   'overview.view': ALL,            // Overview page, activity, live updates
   'conversations.view': ALL,       // Conversations (read)
-  'contacts.full': ADMINS,         // visitor phone / email in full (User role sees them masked)
+  'contacts.full': ALL,            // visitor phone / email in full (a role without it sees them masked)
   'leads.view': ALL,
   'leads.status': ALL,             // change a lead's status
   'remarks.add': ALL,              // add remarks to a conversation (e.g. call notes); delete your own

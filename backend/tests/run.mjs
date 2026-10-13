@@ -520,13 +520,13 @@ if (want('users')) await guard('users', async () => {
   ok(`permission matrix enforced by the API (${matrix.length} endpoints × 3 roles)`, !wrong.length, wrong.join(' | '));
   r = await A.req('GET', '/api/admin/not-a-real-endpoint', { admin: true });
   ok('an admin route missing from the permission list is refused, even for a superuser', r.status === 403);
-  // masked contacts for the User role
+  // contacts: every role sees them in full (the User role makes the follow-up calls)
   const lu = (await A.req('GET', '/api/admin/conversations?limit=20', { as: 'user' })).json, la = (await A.req('GET', '/api/admin/conversations?limit=20', { as: 'admin' })).json;
   const withPhone = la.find((c) => c.phone);
-  const masked = lu.find((c) => c.id === withPhone?.id);
-  ok('User role sees phone numbers masked, Admin in full', !!withPhone && /•/.test(masked?.phone || '') && masked.phone.slice(-4) === withPhone.phone.slice(-4) && !/•/.test(withPhone.phone), `${masked?.phone} vs ${withPhone?.phone}`);
+  const seen = lu.find((c) => c.id === withPhone?.id);
+  ok('User role sees phone numbers in full, like Admin', !!withPhone && seen?.phone === withPhone.phone && !/•/.test(seen.phone), `${seen?.phone} vs ${withPhone?.phone}`);
   const du = (await A.req('GET', `/api/admin/conversations/${withPhone.id}/detail`, { as: 'user' })).json;
-  ok('…in the conversation detail too', /•/.test(du.phone || ''), du.phone);
+  ok('…in the conversation detail too', du.phone === withPhone.phone, du.phone);
   // audit log
   await A.req('GET', '/api/admin/export/leads.csv', { as: 'admin' });
   const au = (await A.req('GET', '/api/admin/audit?limit=200', { admin: true })).json;
@@ -553,7 +553,7 @@ if (want('live')) await guard('live', async () => {
   const cid = s.json.session_id;
   ok('new chat appears live', await until(() => S.find('conversation.new', (d) => d.id === cid), 5000));
   const evS = S.find('conversation.new', (d) => d.id === cid), evU = await until(() => U.find('conversation.new', (d) => d.id === cid), 5000) && U.find('conversation.new', (d) => d.id === cid);
-  ok('live events are masked for the User role (phone), full for Superuser', evS.data.phone === '+63' + phone.slice(1) && /•/.test(evU?.data?.phone || '') && evU.data.phone.slice(-4) === phone.slice(-4), `${evS.data.phone} / ${evU?.data?.phone}`);
+  ok('live events carry the phone in full for every role', evS.data.phone === '+63' + phone.slice(1) && evU?.data?.phone === evS.data.phone, `${evS.data.phone} / ${evU?.data?.phone}`);
   const before = S.events.at(-1)?.id;
   // typing: start / stop only, throttled
   r = await A.req('POST', '/api/typing', { token: s.token, id, body: { state: 'start', text: 'secret draft' } });
@@ -819,7 +819,7 @@ if (want('dashboard')) await guard('dashboard', async () => {
   ok('superuser sees Users and Audit log', !L.$('#nav [data-page="users"]').hidden && !L.$('#nav [data-page="audit"]').hidden);
   await until(() => !L.$('#main .loading') && !!L.$('#main h1'), 10000); await sleep(500);
   L.close();
-  // User role: limited menu, masked contacts, no export
+  // User role: limited menu, no export
   const U = await loadPage(base, '/admin/', { cookie: await login(base, 'user') });
   await until(() => !U.$('#app').hidden, 8000);
   const visible = U.$$('#nav button').filter((b) => !b.hidden).map((b) => b.dataset.page).join(',');
