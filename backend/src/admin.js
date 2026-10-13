@@ -96,14 +96,27 @@ adminRouter.get('/activity', wrap(async (req, res) => {
 }));
 
 // ---------------- conversations ----------------
+// lead filter: '' = all chats · lead = has a lead · uncalled = lead without any remark yet · new / contacted / qualified / closed
+const LEAD_FILTERS = ['lead', 'uncalled', ...LEAD_STATUSES];
 adminRouter.get('/conversations', wrap(async (req, res) => {
   const status = ['open', 'handed_off', 'closed', 'ended'].includes(req.query.status) ? req.query.status : null;
   const search_ = req.query.q ? `%${clean(req.query.q, 100)}%` : null;
   const product = req.query.product ? clean(req.query.product, 60) : null;
+  const lead = LEAD_FILTERS.includes(req.query.lead) ? req.query.lead : null;
   const limit = Math.min(200, parseInt(req.query.limit, 10) || 50);
   const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+  // the same filters for the page and the total; leads are shown even when the chat had no messages
+  const where = `($6::boolean or c.turns > 0 or l.id is not null)
+      and ($1::text is null or c.status=$1)
+      and ($2::text is null or v.name ilike $2 or l.company ilike $2 or exists(select 1 from messages m where m.conversation_id=c.id and m.content ilike $2) or exists(select 1 from remarks r where r.conversation_id=c.id and r.body ilike $2))
+      and ($3::text is null or exists(select 1 from messages m where m.conversation_id=c.id and m.product=$3) or $3 = any(l.product_interest))
+      and ($7::text is null or ($7 = 'lead' and l.id is not null) or ($7 = 'uncalled' and l.id is not null and not exists(select 1 from remarks r where r.conversation_id=c.id)) or l.status = $7)`;
+  const params = [status, search_, product, limit, offset, req.query.all === '1', lead];
   const rows = (await q(`
     select c.id, c.started_at, c.ended_at, c.status, c.lang, c.turns, c.summary, v.name, v.phone, v.phone_type, v.email, v.email_type,
+      l.id lead_id, l.status lead_status, l.need, l.company, l.industry, l.team_size, l.product_interest, l.demo_requested, v.marketing_opt_in,
+      (select count(*) from remarks r where r.conversation_id=c.id)::int remarks_count,
+      (select json_build_object('body', r.body, 'by', coalesce(r.user_name, r.user_email), 'at', r.created_at) from remarks r where r.conversation_id=c.id order by r.id desc limit 1) last_remark,
       (select m.content from messages m where m.conversation_id=c.id and m.role='user' and m.kind='chat' order by m.seq, m.id limit 1) first_question,
       (select array_agg(distinct m.product) from messages m where m.conversation_id=c.id and m.product is not null) products,
       exists(select 1 from leads l where l.conversation_id=c.id) has_lead,
@@ -111,17 +124,11 @@ adminRouter.get('/conversations', wrap(async (req, res) => {
       (select count(*) from feedback f where f.conversation_id=c.id and f.thumb=-1)::int thumbs_down,
       (select count(*) from messages m where m.conversation_id=c.id and m.golden_ids is not null)::int approved_used,
       (select round(avg(f.rating), 1) from feedback f where f.conversation_id=c.id and f.kind='survey')::float rating
-    from conversations c join visitors v on v.id=c.visitor_id
-    where (c.turns > 0 or $6::boolean)
-      and ($1::text is null or c.status=$1)
-      and ($2::text is null or v.name ilike $2 or exists(select 1 from messages m where m.conversation_id=c.id and m.content ilike $2))
-      and ($3::text is null or exists(select 1 from messages m where m.conversation_id=c.id and m.product=$3))
-    order by c.started_at desc limit $4 offset $5`, [status, search_, product, limit, offset, req.query.all === '1'])).rows;
-  const total = (await q(`select count(*)::int n from conversations c join visitors v on v.id=c.visitor_id
-    where (c.turns > 0 or $4::boolean)
-      and ($1::text is null or c.status=$1)
-      and ($2::text is null or v.name ilike $2 or exists(select 1 from messages m where m.conversation_id=c.id and m.content ilike $2))
-      and ($3::text is null or exists(select 1 from messages m where m.conversation_id=c.id and m.product=$3))`, [status, search_, product, req.query.all === '1'])).rows[0].n;
+    from conversations c join visitors v on v.id=c.visitor_id left join leads l on l.conversation_id=c.id
+    where ${where}
+    order by c.started_at desc limit $4 offset $5`, params)).rows;
+  const total = (await q(`select count(*)::int n from conversations c join visitors v on v.id=c.visitor_id left join leads l on l.conversation_id=c.id
+    where ${where} and $4::int >= 0 and $5::int >= 0`, params)).rows[0].n; // limit / offset unused here, but every parameter needs a type
   res.set('x-total-count', String(total)).set('access-control-expose-headers', 'x-total-count');
   res.json(rows.map((x) => ({ ...x, phone: decrypt(x.phone), email: decrypt(x.email) })));
 }));
@@ -135,9 +142,10 @@ adminRouter.get('/conversations/:id/detail', wrap(async (req, res) => {
   const feedback = (await q('select * from feedback where conversation_id=$1 order by id', [req.params.id])).rows;
   const lead = (await q('select * from leads where conversation_id=$1', [req.params.id])).rows[0] || null;
   const handoffs = (await q('select * from handoffs where conversation_id=$1 order by id', [req.params.id])).rows;
+  const remarks = (await q('select id, user_id, user_email, user_name, body, created_at from remarks where conversation_id=$1 order by id', [req.params.id])).rows;
   const others = (await q(`select count(*)::int n from conversations c join visitors v on v.id=c.visitor_id
                            where c.id <> $1 and ${SAME_PERSON}`, [req.params.id, conv.visitor_id])).rows[0].n;
-  res.json({ ...conv, phone: decrypt(conv.phone), email: decrypt(conv.email), messages, golden, feedback, lead, handoffs, other_conversations: others });
+  res.json({ ...conv, phone: decrypt(conv.phone), email: decrypt(conv.email), messages, golden, feedback, lead, handoffs, remarks, other_conversations: others });
 }));
 
 // Everything the same person said across visits and sign-ups (same visitor, or same contact on a new sign-up), oldest first.
@@ -155,6 +163,33 @@ adminRouter.put('/leads/:id', wrap(async (req, res) => {
   if (!LEAD_STATUSES.includes(status)) return res.status(400).json({ error: 'bad_status' });
   const l = (await q('update leads set status=$2, updated_at=now() where id=$1 returning conversation_id', [req.params.id, status])).rows[0];
   if (l) publish('lead.update', { id: req.params.id, conversation_id: l.conversation_id, status });
+  res.json({ ok: true });
+}));
+
+// ---------------- remarks (call notes by the sales / telemarketing team) ----------------
+adminRouter.get('/conversations/:id/remarks', wrap(async (req, res) => {
+  res.json((await q('select id, user_id, user_email, user_name, body, created_at from remarks where conversation_id=$1 order by id', [req.params.id])).rows);
+}));
+adminRouter.post('/conversations/:id/remarks', wrap(async (req, res) => {
+  const body = clean(req.body?.body, 2000);
+  if (!body) return res.status(400).json({ error: 'empty' });
+  if (!(await q('select 1 from conversations where id=$1', [req.params.id])).rowCount) return res.status(404).json({ error: 'not_found' });
+  const r = (await q('insert into remarks(conversation_id, user_id, user_email, user_name, body) values($1,$2,$3,$4,$5) returning id, user_id, user_email, user_name, body, created_at',
+    [req.params.id, req.user.id, req.user.email, req.user.name || null, body])).rows[0];
+  // a remark means the team has acted on the lead: move a "new" lead to "contacted"
+  if (req.body?.contacted !== false) {
+    const l = (await q(`update leads set status='contacted', updated_at=now() where conversation_id=$1 and status='new' returning id`, [req.params.id])).rows[0];
+    if (l) publish('lead.update', { id: l.id, conversation_id: req.params.id, status: 'contacted' });
+  }
+  publish('remark.new', { conversation_id: req.params.id, ...r, id: Number(r.id) });
+  res.json({ ...r, id: Number(r.id) });
+}));
+adminRouter.delete('/remarks/:id', wrap(async (req, res) => {
+  const r = (await q('select id, conversation_id, user_id from remarks where id=$1', [req.params.id])).rows[0];
+  if (!r) return res.status(404).json({ error: 'not_found' });
+  if (r.user_id !== req.user.id && req.user.role !== 'superuser') return res.status(403).json({ error: 'not_your_remark' });
+  await q('delete from remarks where id=$1', [r.id]);
+  publish('remark.deleted', { conversation_id: r.conversation_id, id: Number(r.id) });
   res.json({ ok: true });
 }));
 

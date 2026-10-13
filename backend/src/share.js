@@ -88,7 +88,7 @@ h2{font-size:15px;margin:0 0 10px}.summary{white-space:pre-wrap}
 .thread{display:grid;gap:10px}.m{max-width:88%}.m p{margin:0 0 6px}.m p:last-child{margin:0}.m ul,.m ol{margin:0 0 6px;padding-left:18px}
 .b{padding:10px 13px;border-radius:4px 14px 14px 14px;background:var(--surface);border:1px solid var(--line)}.u{justify-self:end}.u .b{background:var(--ink);color:#fff;border:0;border-radius:14px 4px 14px 14px}.u .b a{color:#fff}
 .s .b{background:#FBFAF8;color:var(--ink-2);border-style:dashed}.e{justify-self:center;font-size:12px;color:var(--ink-3);background:#EFEDEA;border-radius:99px;padding:3px 12px}
-.t{font-size:11px;color:var(--ink-3);margin-top:3px}.u .t{text-align:right}a{color:var(--brand-dark)}
+.t{font-size:11px;color:var(--ink-3);margin-top:3px}.remarks{display:grid;gap:10px}.r{border-left:3px solid var(--brand);padding:2px 0 2px 12px}.r p{margin:0;white-space:pre-wrap}.u .t{text-align:right}a{color:var(--brand-dark)}
 footer{margin-top:24px;font-size:12px;color:var(--ink-3)}@media(max-width:520px){dl{grid-template-columns:1fr}dt{margin-top:6px}}`;
 
 function page(title, body) {
@@ -122,6 +122,7 @@ export async function sharePage(req, res, next) {
                         from conversations c join visitors v on v.id = c.visitor_id left join leads l on l.conversation_id = c.id where c.id = $1`, [link.conversation_id])).rows[0];
     if (!c) return gone(res, 410); // visitor data was deleted
     const msgs = (await q(`select role, kind, content, created_at, tool_name from messages where conversation_id = $1 order by seq, id`, [link.conversation_id])).rows;
+    const remarks = (await q(`select coalesce(user_name, user_email) who, body, created_at from remarks where conversation_id = $1 order by id`, [link.conversation_id])).rows;
     const phone = decrypt(c.phone), email = decrypt(c.email);
     const row = (k, v) => (v ? `<dt>${esc(k)}</dt><dd>${v}</dd>` : '');
     const thread = msgs.map((m) => {
@@ -141,6 +142,7 @@ ${row('Interested in', (c.product_interest || []).length ? `<span class="tags">$
 ${row('Demo', c.demo_requested ? 'Requested' : '')}
 </dl></div>
 <div class="card"><h2>What they need</h2>${c.need ? `<p>${esc(c.need)}</p>` : ''}${link.summary ? `<p class="summary">${esc(link.summary)}</p>` : !c.need ? '<p class="sub">No summary yet.</p>' : ''}</div>
+<div class="card"><h2>Remarks from the team</h2>${remarks.length ? `<div class="remarks">${remarks.map((r) => `<div class="r"><p>${esc(r.body)}</p><div class="t">${esc(r.who || 'Team')} · ${esc(when(r.created_at))}</div></div>`).join('')}</div>` : '<p class="sub">No remarks yet.</p>'}</div>
 <div class="card"><h2>Conversation</h2><div class="thread">${thread || '<p class="sub">No messages.</p>'}</div></div>
 <footer>Shared from the DES dashboard. Card, TIN and ID numbers in messages are hidden. Please don't forward this link.</footer>`));
   } catch (e) { next(e); }

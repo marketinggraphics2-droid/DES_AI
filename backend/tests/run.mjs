@@ -628,6 +628,42 @@ if (want('share')) await guard('share', async () => {
 });
 
 // =====================================================================================
+sec('10f. Conversations & leads: lead filter and remarks (call notes)');
+if (want('remarks')) await guard('remarks', async () => {
+  const id = ident(); const s = await A.session(id, { name: 'Remark Tester' }); const cid = s.json.session_id;
+  await A.chat(s.token, 'We are a 30-person distributor and want SAP Business One with barcode scanning. Can someone call me?', id);
+  // make sure there is a lead (the AI usually saves one; this guarantees it for the test)
+  let list = (await A.req('GET', '/api/admin/conversations?lead=lead&limit=200', { as: 'admin' })).json;
+  let row = list.find((c) => c.id === cid);
+  if (!row) { await A.req('POST', '/api/handoff', { token: s.token, id, body: { reason: 'test' } }); info('AI saved no lead this time; lead filter checked on other chats'); }
+  const anyLead = list[0];
+  ok('lead filter returns only chats with a lead, with status and remark fields', list.length > 0 && list.every((c) => c.lead_id && 'lead_status' in c && 'remarks_count' in c));
+  const target = row || anyLead;
+  ok('a fresh lead shows as "not called yet"', (await A.req('GET', '/api/admin/conversations?lead=uncalled&limit=200', { as: 'admin' })).json.some((c) => c.id === target.id) || target.remarks_count > 0);
+  // remarks: every role may add; the author (or a superuser) may delete
+  let r = await A.req('POST', `/api/admin/conversations/${target.id}/remarks`, { as: 'user', body: { body: 'No answer. Will call back at 3 PM.' } });
+  ok('telemarketer (User role) adds a remark', r.status === 200 && r.json.user_email === USERS.user, r.text);
+  const rid = r.json?.id;
+  r = await A.req('POST', `/api/admin/conversations/${target.id}/remarks`, { as: 'user', body: { body: '   ' } });
+  ok('empty remark refused', r.status === 400);
+  const det = (await A.req('GET', `/api/admin/conversations/${target.id}/detail`, { as: 'admin' })).json;
+  ok('remark appears in the conversation with who and when', det.remarks.some((x) => x.body.startsWith('No answer') && x.user_email === USERS.user && x.created_at));
+  ok('a new lead becomes "contacted" after the first remark', det.lead?.status !== 'new', det.lead?.status);
+  ok('called lead leaves the "not called yet" list', !(await A.req('GET', '/api/admin/conversations?lead=uncalled&limit=200', { as: 'admin' })).json.some((c) => c.id === target.id));
+  const row2 = (await A.req('GET', '/api/admin/conversations?lead=lead&limit=200', { as: 'admin' })).json.find((c) => c.id === target.id);
+  ok('list shows the remark count and the latest remark', row2?.remarks_count >= 1 && /No answer/.test(row2.last_remark?.body || ''), JSON.stringify(row2?.last_remark));
+  ok('search finds remark text', (await A.req('GET', '/api/admin/conversations?q=' + encodeURIComponent('call back at 3 PM'), { as: 'admin' })).json.some((c) => c.id === target.id));
+  // share page shows remarks
+  const sh = (await A.req('POST', `/api/admin/conversations/${target.id}/share`, { as: 'admin', body: { ttl: '24h' } })).json;
+  const html = await (await fetch(sh.url, { headers: { 'cf-connecting-ip': '203.0.113.121' } })).text();
+  ok('shared conversation link shows the remarks', /Remarks from the team/.test(html) && /No answer\. Will call back at 3 PM\./.test(html));
+  r = await A.req('DELETE', '/api/admin/remarks/' + rid, { as: 'admin' });
+  ok("an admin cannot delete someone else's remark", r.status === 403);
+  r = await A.req('DELETE', '/api/admin/remarks/' + rid, { as: 'user' });
+  ok('the author deletes their own remark', r.status === 200 && !(await A.req('GET', `/api/admin/conversations/${target.id}/detail`, { as: 'admin' })).json.remarks.some((x) => x.id === rid));
+});
+
+// =====================================================================================
 sec('10b. Access from the internet (through the tunnel)');
 if (want('access')) await guard('access', async () => {
   const pub = { 'cf-connecting-ip': '203.0.113.77' };
@@ -787,9 +823,10 @@ if (want('dashboard')) await guard('dashboard', async () => {
   const U = await loadPage(base, '/admin/', { cookie: await login(base, 'user') });
   await until(() => !U.$('#app').hidden, 8000);
   const visible = U.$$('#nav button').filter((b) => !b.hidden).map((b) => b.dataset.page).join(',');
-  ok('User role menu: Overview, Conversations, Leads only', visible === 'overview,conversations,leads', visible);
-  U.w.location.hash = '#/leads'; await until(() => U.$('#main h1')?.textContent === 'Leads', 8000); await sleep(300);
-  ok('User role: no CSV export button', !U.$$('#main button').some((b) => /Download CSV/.test(b.textContent)));
+  ok('User role menu: Overview and Conversations & leads only', visible === 'overview,conversations', visible);
+  U.w.location.hash = '#/leads'; await until(() => U.$('#main h1')?.textContent === 'Conversations & leads', 8000); await sleep(300);
+  ok('old Leads address opens Conversations & leads filtered to leads', /#\/conversations\/leads$/.test(U.w.location.hash) && U.$$('#main select').some((s) => s.value === 'lead'), U.w.location.hash);
+  ok('User role: no CSV export button', !U.$$('#main button').some((b) => /CSV/.test(b.textContent)));
   U.w.location.hash = '#/conversations'; await until(() => U.$('tr.is-click'), 8000); U.$('tr.is-click').click(); await until(() => U.$('.drawer .thread'), 8000);
   ok('User role: no share link or delete button in a conversation', ![...U.$$('.drawer button')].some((b) => /Create share link|Delete this visitor/.test(b.textContent)));
   U.d.dispatchEvent(new U.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
@@ -801,7 +838,7 @@ if (want('dashboard')) await guard('dashboard', async () => {
   const toasts = []; new P.w.MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((x) => { if (x.classList?.contains('toast')) toasts.push((x.classList.contains('is-bad') ? 'BAD ' : '') + x.textContent); }))).observe(P.d.body, { childList: true });
   ok('signed-in superuser gets the dashboard', await until(() => !P.$('#app').hidden, 8000));
   const go = async (h) => { P.w.location.hash = h; await sleep(250); await until(() => !P.$('#main .loading'), 15000); await sleep(400); };
-  const pages = { '#/overview': () => P.$$('.kpi').length >= 8 && !!P.$('.chart svg'), '#/conversations': () => P.$$('tbody tr.is-click').length > 0, '#/leads': () => P.$('#main h1')?.textContent === 'Leads',
+  const pages = { '#/overview': () => P.$$('.kpi').length >= 8 && !!P.$('.chart svg'), '#/conversations': () => P.$$('tbody tr.is-click').length > 0, '#/conversations/leads': () => P.$('#main h1')?.textContent === 'Conversations & leads' && P.$$('#main button').some((b) => /Download leads CSV/.test(b.textContent)),
     '#/finetune/IQ%20People': () => P.$$('.plist button').length === 13 && !!P.$('.test') && !!P.$('.ptabs'), '#/review': () => P.$('#main h1')?.textContent === 'Needs review',
     '#/kb': () => P.d.querySelector('.paged tbody')?.children.length === 25 && !!P.$('.pager'), '#/settings': () => P.$$('input.mono').length > 5 && !!P.$('details textarea') };
   for (const [h, check] of Object.entries(pages)) { await go(h); await until(check, 8000); ok('page ' + h, check()); }
@@ -822,7 +859,9 @@ if (want('dashboard')) await guard('dashboard', async () => {
     await until(() => P.$('.drawer [data-tab="history"]'), 8000);
     ok('drawer offers the visitor history of the same person', !!P.$('.drawer [data-tab="history"]'));
     P.$('.drawer [data-tab="history"]')?.click();
-    ok('visitor history shows every chat of the person, oldest first, sign-up bubbles in grey', await until(() => P.$$('.drawer .history-conv').length >= 2 && P.$$('.drawer .msg--script').length >= 5, 8000), P.$$('.drawer .history-conv').length + ' chats');
+    ok('visitor history lists every chat of the person as a closed row (date, status, first question)', await until(() => P.$$('.drawer .history-conv').length >= 2, 8000) && P.$$('.drawer .history-conv').every((d) => !d.open) && P.$$('.drawer .msg').length === 0, P.$$('.drawer .history-conv').length + ' chats');
+    P.$$('.drawer .history-conv').forEach((d) => { d.open = true; d.dispatchEvent(new P.w.Event('toggle')); });
+    ok('clicking a row reveals that chat (sign-up bubbles in grey)', await until(() => P.$$('.drawer .msg--script').length >= 5, 4000), P.$$('.drawer .msg--script').length);
     ok('incomplete and guardrail-replaced replies are flagged', P.$$('.drawer .badge').some((b) => /Cut short/.test(b.textContent)) && !!P.$('.drawer .msg__orig'));
     P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
     sb.value = ''; sb.dispatchEvent(new P.w.Event('input')); await until(() => P.$$('tbody tr.is-click').length > 1, 8000);
@@ -844,6 +883,11 @@ if (want('dashboard')) await guard('dashboard', async () => {
   await go('#/conversations'); P.$('tr.is-click').click(); await until(() => P.$('.drawer .thread'), 8000);
   ok('conversation drawer opens with messages', P.$$('.drawer .msg').length > 0);
   ok('drawer offers "Create share link" to a superuser', [...P.$$('.drawer button')].some((b) => /Create share link/.test(b.textContent)));
+  const ta = P.$('.drawer .remarks-card textarea');
+  ok('drawer has a remarks box with quick notes', !!ta && P.$$('.drawer .remarks-card .chip').length >= 5);
+  P.$$('.drawer .remarks-card .chip').find((b) => /No answer/.test(b.textContent)).click();
+  [...P.$$('.drawer .remarks-card button')].find((b) => /Save remark/.test(b.textContent)).click();
+  ok('saving a remark shows it in the conversation', await until(() => P.$$('.drawer .remark').some((x) => /No answer/.test(x.textContent)), 6000));
   P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100); ok('Escape closes it', !P.$('.drawer'));
   await go('#/finetune/IQ%20People');
   [...P.$$('button')].find((b) => b.textContent.includes('Add approved answer')).click(); await sleep(200);

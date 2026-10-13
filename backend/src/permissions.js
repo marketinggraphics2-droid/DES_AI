@@ -15,6 +15,7 @@ export const PERMISSIONS = {
   'contacts.full': ADMINS,         // visitor phone / email in full (User role sees them masked)
   'leads.view': ALL,
   'leads.status': ALL,             // change a lead's status
+  'remarks.add': ALL,              // add remarks to a conversation (e.g. call notes); delete your own
   'leads.export': ADMINS,          // Leads CSV export (and the approved-answer training file)
   'share.create': ADMINS,          // share links for a conversation
   'finetune.manage': ADMINS,       // Fine-tune answers, Needs review, product notes, test box
@@ -37,6 +38,7 @@ export const ROUTES = [
   ['GET', '/conversations', 'conversations.view'], ['GET', '/conversations/:id', 'conversations.view'],
   ['GET', '/conversations/:id/detail', 'conversations.view'], ['GET', '/conversations/:id/history', 'conversations.view'],
   ['GET', '/leads', 'leads.view'], ['PUT', '/leads/:id', 'leads.status'],
+  ['GET', '/conversations/:id/remarks', 'conversations.view'], ['POST', '/conversations/:id/remarks', 'remarks.add'], ['DELETE', '/remarks/:id', 'remarks.add'],
   ['GET', '/export/leads.csv', 'leads.export'], ['GET', '/export/finetune.jsonl', 'leads.export'],
   ['POST', '/conversations/:id/share', 'share.create'], ['GET', '/shares', 'share.create'], ['DELETE', '/shares/:id', 'share.create'],
   ['GET', '/products', 'finetune.manage'], ['GET', '/products/:name', 'finetune.manage'], ['PUT', '/products/:name/notes', 'finetune.manage'],

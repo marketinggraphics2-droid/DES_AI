@@ -306,3 +306,15 @@ create index if not exists share_links_conv_idx on share_links(conversation_id);
 -- ---- dashboard sign-in: "keep me signed in" + sign-out after inactivity (2026-10-13) ----
 alter table admin_sessions add column if not exists remember boolean not null default false;
 alter table admin_sessions add column if not exists last_active_at timestamptz default now(); -- last time the person used the dashboard (not background refreshes)
+
+-- ---- remarks: notes by the sales / telemarketing team on a conversation (2026-10-13) ----
+create table if not exists remarks (
+  id bigserial primary key,
+  conversation_id uuid references conversations(id) on delete cascade,
+  user_id uuid,
+  user_email text,
+  user_name text,
+  body text not null,
+  created_at timestamptz default now()
+);
+create index if not exists remarks_conv_idx on remarks(conversation_id, id);

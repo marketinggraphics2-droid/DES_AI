@@ -15,7 +15,7 @@ const BOOT = Date.now().toString(36); // ids restart with the process; the dashb
 /** permission needed to receive each event type */
 const NEED = {
   'conversation.new': 'conversations.view', 'conversation.update': 'conversations.view', 'message.new': 'conversations.view',
-  typing: 'conversations.view', presence: 'conversations.view', 'lead.update': 'leads.view',
+  typing: 'conversations.view', presence: 'conversations.view', 'lead.update': 'leads.view', 'remark.new': 'conversations.view', 'remark.deleted': 'conversations.view',
   'review.count': 'finetune.manage', 'overview.tick': 'overview.view',
 };
 

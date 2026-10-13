@@ -287,3 +287,30 @@ tr.is-live .live-dot { display: inline-block; }
 .login__remember { margin: 4px 0 2px; }
 .login__note { font-size: 12px; color: var(--ink-3); margin: 0 0 14px; }
 .idle-warning { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 80; background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: var(--shadow); font-size: 14px; max-width: calc(100vw - 32px); }
+
+/* conversations & leads: remarks */
+.input--sm { padding: 4px 8px; font-size: 13px; min-height: 0; }
+.remarks { display: grid; gap: 10px; margin-bottom: 12px; }
+.remark { border-left: 3px solid var(--brand); padding: 2px 0 2px 10px; }
+.remark__body { white-space: pre-wrap; }
+.remark-form { display: grid; gap: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { all: unset; cursor: pointer; font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); }
+.chip:hover { border-color: var(--brand-line); color: var(--ink); }
+
+/* visitor history: one row per visit, opens on click */
+.history-list { display: grid; gap: 8px; }
+.history-conv { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.history-conv.is-current { border-color: var(--brand-line); }
+.history-conv > summary { cursor: pointer; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.history-conv[open] > summary { border-bottom: 1px solid var(--line); }
+.history-conv__when { font-weight: 600; font-size: 13px; }
+.history-conv__first { flex-basis: 100%; font-size: 13px; color: var(--ink-2); }
+.history-conv__body { padding: 12px; }
+.history-conv.is-current .thread { outline: none; }
+
+/* tab strips and button rows: scroll sideways on narrow screens, but never show a scrollbar
+   (overflow-x: auto also allowed vertical scrolling, and the 1px tab underline triggered arrows) */
+.ptabs, .tabs-row, .plist, .side, [role="tablist"] { overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
+.ptabs::-webkit-scrollbar, .tabs-row::-webkit-scrollbar, .plist::-webkit-scrollbar, .side::-webkit-scrollbar, [role="tablist"]::-webkit-scrollbar { display: none; }
+@media (min-width: 1101px) { .plist { overflow-y: auto; } } /* the product list scrolls up/down on wide screens */

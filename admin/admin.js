@@ -220,7 +220,8 @@
     const arg = rest.length ? decodeURIComponent(rest.join('/')) : null;
     document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('is-on', b.dataset.page === page));
     closeLayer();
-    const pages = { overview: pageOverview, conversations: pageConversations, leads: pageLeads, finetune: pageFinetune, review: pageReview, kb: pageKb, settings: pageSettings, users: pageUsers, audit: pageAudit };
+    if (page === 'leads') { location.replace('#/conversations/leads'); return; } // Leads now live in Conversations (lead filter)
+    const pages = { overview: pageOverview, conversations: pageConversations, finetune: pageFinetune, review: pageReview, kb: pageKb, settings: pageSettings, users: pageUsers, audit: pageAudit };
     const btn = document.querySelector(`#nav button[data-page="${page}"]`);
     live.page = null; // the page sets its own live handler
     if (!pages[page] || !btn || btn.hidden) return pageOverview(); // not this role's page
@@ -380,52 +381,102 @@
   }
 
   // ---------------- conversations ----------------
-  async function pageConversations() {
+  /** Leads CSV download (Admin / Superuser). */
+  async function downloadLeads() {
+    try { const r = await api('/admin/export/leads.csv', { raw: true }); const url = URL.createObjectURL(await r.blob()); const a = h('a', { href: url, download: `des-leads-${new Date().toISOString().slice(0, 10)}.csv` }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); } catch (e) { fail(e); }
+  }
+  /** Lead status dropdown; changing it saves straight away. */
+  function leadStatusSelect(leadId, value, after) {
+    return h('select', { class: 'input input--sm', 'aria-label': 'Lead status', disabled: !can('leads.status'), on: { click: (e) => e.stopPropagation(), change: async (e) => {
+      try { await api('/admin/leads/' + leadId, { method: 'PUT', body: { status: e.target.value } }); toast('Lead status updated'); after?.(e.target.value); } catch (err) { fail(err); }
+    } } }, LEAD_STATUSES.map((st) => h('option', { value: st, text: st[0].toUpperCase() + st.slice(1), selected: st === value })));
+  }
+
+  // ---------------- conversations + leads (one page; the lead filter shows only leads) ----------------
+  const LEAD_FILTER_OPTS = [['', 'All chats'], ['lead', 'Leads only'], ['uncalled', 'Leads not called yet'], ['new', 'Leads: new'], ['contacted', 'Leads: contacted'], ['qualified', 'Leads: qualified'], ['closed', 'Leads: closed']];
+  async function pageConversations(arg) {
     const SIZE = 25;
-    const filters = { q: '', status: '', product: '', page: 1, all: false };
+    const filters = { q: '', status: '', product: '', lead: arg === 'leads' ? 'lead' : (LEAD_FILTER_OPTS.some(([v]) => v === arg) ? arg : ''), page: 1, all: false };
     const tbody = h('tbody'), pagerBox = h('div');
-    const search = h('input', { class: 'input', type: 'search', placeholder: 'Search name or message…', 'aria-label': 'Search conversations' });
-    const status = h('select', { class: 'input', 'aria-label': 'Status' }, h('option', { value: '', text: 'All statuses' }), h('option', { value: 'open', text: 'Open' }), h('option', { value: 'handed_off', text: 'Handed to sales' }), h('option', { value: 'closed', text: 'Closed' }), h('option', { value: 'ended', text: 'Ended by DES' }));
+    const search = h('input', { class: 'input', type: 'search', placeholder: 'Search name, company, message or remark…', 'aria-label': 'Search conversations' });
+    const leadSel = h('select', { class: 'input', 'aria-label': 'Leads' }, LEAD_FILTER_OPTS.map(([v, t]) => h('option', { value: v, text: t }))); leadSel.value = filters.lead;
+    const status = h('select', { class: 'input', 'aria-label': 'Chat status' }, h('option', { value: '', text: 'All chat statuses' }), h('option', { value: 'open', text: 'Open' }), h('option', { value: 'handed_off', text: 'Handed to sales' }), h('option', { value: 'closed', text: 'Closed' }), h('option', { value: 'ended', text: 'Ended by DES' }));
     const product = h('select', { class: 'input', 'aria-label': 'Product' }, h('option', { value: '', text: 'All products' }), state.status.products.filter((p) => p !== GENERAL).map((p) => h('option', { value: p, text: p })));
+    const remarkCell = (c) => c.remarks_count
+      ? h('td', null, badge(`${c.remarks_count} remark${c.remarks_count === 1 ? '' : 's'}`, 'badge--info'), h('div', { class: 'muted clip', text: c.last_remark?.body || '', title: c.last_remark?.body || '' }), h('div', { class: 'note', text: `${c.last_remark?.by || ''} · ${ago(c.last_remark?.at)}` }))
+      : h('td', null, c.lead_id ? badge('Not called yet', 'badge--bad') : h('span', { class: 'muted', text: '—' }));
     const load = async (page = 1, scroll = false) => {
       filters.page = page;
       tbody.replaceChildren(h('tr', null, h('td', { colspan: 7, class: 'loading', text: 'Loading…' })));
-      const qs = new URLSearchParams({ limit: SIZE, offset: (page - 1) * SIZE }); if (filters.q) qs.set('q', filters.q); if (filters.status) qs.set('status', filters.status); if (filters.product) qs.set('product', filters.product); if (filters.all) qs.set('all', '1');
+      const qs = new URLSearchParams({ limit: SIZE, offset: (page - 1) * SIZE });
+      for (const k of ['q', 'status', 'product', 'lead']) if (filters[k]) qs.set(k, filters[k]);
+      if (filters.all) qs.set('all', '1');
       let rows, total; try { const r = await api('/admin/conversations?' + qs, { raw: true }); total = Number(r.headers.get('x-total-count')) || 0; rows = await r.json(); } catch (e) { return fail(e); }
       tbody.replaceChildren();
-      if (!rows.length) tbody.append(h('tr', null, h('td', { colspan: 7 }, empty('No conversations found', 'Try another filter.'))));
+      if (!rows.length) tbody.append(h('tr', null, h('td', { colspan: 7 }, empty(filters.lead ? 'No leads found' : 'No conversations found', 'Try another filter.'))));
       rows.forEach((c) => tbody.append(h('tr', { class: 'is-click' + (live.active.has(c.id) ? ' is-live' : ''), 'data-id': c.id, tabindex: '0', on: { click: () => openConversation(c.id), keydown: (e) => { if (e.key === 'Enter') openConversation(c.id); } } },
         h('td', { class: 'muted', style: { whiteSpace: 'nowrap' } }, h('span', { class: 'live-dot', title: 'Active now', 'aria-label': 'Active now' }), when(c.started_at)),
-        h('td', null, h('div', { text: c.name, style: { fontWeight: 600 } }), contactLines(c)),
-        h('td', null, h('div', { class: 'clip', text: c.first_question || '—', title: c.first_question || '' }), c.summary ? h('div', { class: 'muted clip', text: c.summary }) : null),
-        h('td', null, h('div', { class: 'badges' }, (c.products || []).map((p) => badge(p)))),
-        h('td', { class: 'num', text: c.turns }),
-        h('td', null, h('div', { class: 'badges' }, c.demo ? badge('Demo', 'badge--brand') : c.has_lead ? badge('Lead', 'badge--brand') : null,
+        h('td', null, h('div', { text: c.name, style: { fontWeight: 600 } }), contactLines(c), c.company ? h('div', { class: 'muted', text: [c.company, c.industry, c.team_size && c.team_size + ' people'].filter(Boolean).join(' · ') }) : null),
+        h('td', null, h('div', { class: 'clip', text: c.need || c.first_question || '—', title: c.need || c.first_question || '' }), c.summary ? h('div', { class: 'muted clip', text: c.summary }) : null),
+        h('td', null, h('div', { class: 'badges' }, [...new Set([...(c.product_interest || []), ...(c.products || [])])].map((p) => badge(p, (c.product_interest || []).includes(p) ? 'badge--brand' : '')), c.demo_requested ? badge('Demo', 'badge--brand') : null)),
+        h('td', null, c.lead_id ? leadStatusSelect(c.lead_id, c.lead_status, () => reload()) : h('span', { class: 'muted', text: 'No lead' })),
+        remarkCell(c),
+        h('td', null, statusBadge(c.status), h('div', { class: 'badges', style: { marginTop: '4px' } },
           c.approved_used ? badge(`Approved ×${c.approved_used}`, 'badge--good') : null, c.thumbs_down ? badge(`👎 ${c.thumbs_down}`, 'badge--bad') : null,
-          c.rating ? badge(`★ ${c.rating}`) : null, c.lang === 'fil' ? badge('Filipino') : null)),
-        h('td', null, statusBadge(c.status)))));
+          c.rating ? badge(`★ ${c.rating}`) : null, c.lang === 'fil' ? badge('Filipino') : null)))));
       pagerBox.replaceChildren(...[pager(total, page, SIZE, (x) => load(x, true))].filter(Boolean));
       if (scroll) main.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
     };
-    // live: new chats / messages / status changes refresh this page in place; the dot marks chats active right now
+    // live: new chats / messages / leads / remarks refresh this page in place; the dot marks chats active right now
     const reload = debounce(() => load(filters.page), 700);
     live.page = (type) => {
       if (type === 'presence') tbody.querySelectorAll('tr[data-id]').forEach((tr) => tr.classList.toggle('is-live', live.active.has(tr.dataset.id)));
-      else if (['conversation.new', 'conversation.update', 'message.new'].includes(type)) reload();
+      else if (['conversation.new', 'conversation.update', 'message.new', 'lead.update', 'remark.new', 'remark.deleted'].includes(type)) reload();
     };
     search.addEventListener('input', debounce(() => { filters.q = search.value.trim(); load(1); }));
+    leadSel.addEventListener('change', () => { filters.lead = leadSel.value; load(1); });
     status.addEventListener('change', () => { filters.status = status.value; load(1); });
     product.addEventListener('change', () => { filters.product = product.value; load(1); });
     const allBox = h('input', { type: 'checkbox', on: { change: () => { filters.all = allBox.checked; load(1); } } });
     const allLbl = h('label', { class: 'check', title: 'Chats where the visitor opened DES but never sent a message' }, allBox, ' Include empty chats');
+    const dl = can('leads.export') ? h('button', { class: 'btn', type: 'button', text: 'Download leads CSV', on: { click: downloadLeads } }) : null;
     main.replaceChildren(
-      top('Conversations', 'Every chat with DES. Open one to read it and turn a reply into an approved answer.'),
+      top('Conversations & leads', 'Every chat with DES. Filter to leads to work the call list; open one to read it and add remarks.', dl),
       h('section', { class: 'card' },
-        h('div', { class: 'card__head' }, h('div', { class: 'filters' }, search, status, product, allLbl)),
-        h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, ['Started', 'Visitor', 'First question', 'Products', 'Turns', 'Signals', 'Status'].map((t, i) => h('th', { text: t, class: i === 4 ? 'num' : null })))), tbody)),
+        h('div', { class: 'card__head' }, h('div', { class: 'filters' }, search, leadSel, status, product, allLbl)),
+        h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, ['Started', 'Visitor', 'Need / first question', 'Products', 'Lead status', 'Remarks', 'Chat'].map((t) => h('th', { text: t })))), tbody)),
         pagerBox),
     );
     load();
+  }
+
+  // ---------------- remarks (call notes) in a conversation ----------------
+  const QUICK_REMARKS = ['No answer', 'Busy, call back later', 'Interested, sending proposal', 'Booked a demo', 'Not interested', 'Wrong number'];
+  function remarksBlock(conversationId, initial, onLeadChange) {
+    const list = h('div', { class: 'remarks' });
+    const render = (rows) => list.replaceChildren(...(rows.length ? rows.map((r) => h('div', { class: 'remark', 'data-id': r.id },
+      h('div', { class: 'remark__body', text: r.body }),
+      h('div', { class: 'note' }, `${r.user_name || r.user_email || 'Team'} · ${when(r.created_at)}`,
+        (r.user_id === state.me.id || state.me.role === 'superuser') ? h('button', { class: 'link-btn', type: 'button', text: 'Delete', style: { marginLeft: '8px' }, on: { click: async () => {
+          if (!confirm('Delete this remark?')) return;
+          try { await api('/admin/remarks/' + r.id, { method: 'DELETE' }); rows = rows.filter((x) => x.id !== r.id); render(rows); } catch (e) { fail(e); }
+        } } }) : null))) : [h('p', { class: 'muted', style: { margin: 0 }, text: 'No remarks yet. Add one after each call.' })]));
+    let rows = initial.slice(); render(rows);
+    const ta = h('textarea', { class: 'input', rows: 2, placeholder: 'What happened on the call? e.g. Spoke with Ana, wants a demo next week.', 'aria-label': 'Remark', maxLength: 2000 });
+    const save = async () => {
+      const body = ta.value.trim(); if (!body) return toast('Write a remark first', true);
+      try { const r = await api(`/admin/conversations/${conversationId}/remarks`, { method: 'POST', body: { body } }); rows.push(r); render(rows); ta.value = ''; toast('Remark saved'); onLeadChange?.(); } catch (e) { fail(e); }
+    };
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save(); });
+    const add = (r) => { if (!rows.some((x) => Number(x.id) === Number(r.id))) { rows.push(r); render(rows); } };
+    const remove = (rid) => { rows = rows.filter((x) => Number(x.id) !== Number(rid)); render(rows); };
+    const box = h('section', { class: 'card remarks-card', style: { marginBottom: '16px' } },
+      h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Remarks' }), h('p', { text: 'Call notes from the team. Also shown on a shared link.' }))),
+      h('div', { class: 'card__body' }, list,
+        can('remarks.add') ? h('div', { class: 'remark-form' },
+          h('div', { class: 'chips' }, QUICK_REMARKS.map((t) => h('button', { class: 'chip', type: 'button', text: t, on: { click: () => { ta.value = ta.value.trim() ? `${ta.value.trim()} ${t}.` : `${t}.`; ta.focus(); } } }))),
+          ta, h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Save remark', on: { click: save } }), h('span', { class: 'note', text: 'Ctrl + Enter saves. A new lead becomes "contacted".' }))) : null));
+    return { box, add, remove };
   }
 
   /** Messages in the order the visitor saw them. Grey bubbles: scripted widget messages (sign-up, survey, notices). */
@@ -483,9 +534,19 @@
         tab('history', `Visitor history (${c.other_conversations + 1} chats)`, async () => {
           panel.replaceChildren(h('div', { class: 'loading', text: 'Loading…' }));
           let hst; try { hst = await api(`/admin/conversations/${id}/history`); } catch (e) { return fail(e); }
-          panel.replaceChildren(...hst.conversations.map((cv) => h('section', { class: 'history-conv' + (cv.id === id ? ' is-current' : '') },
-            h('div', { class: 'day-sep' }, h('span', { text: when(cv.started_at) }), statusBadge(cv.status), cv.id === id ? badge('This conversation', 'badge--brand') : null),
-            cv.messages.length ? renderThread(cv.messages, {}) : h('p', { class: 'muted', text: 'Opened the chat, sent nothing.' }))));
+          // one row per visit (newest first); the chat opens when the row is clicked
+          panel.replaceChildren(h('div', { class: 'history-list' }, [...hst.conversations].reverse().map((cv) => {
+            const said = cv.messages.filter((m) => m.role === 'user' && m.kind === 'chat');
+            const first = said[0]?.content || cv.messages.find((m) => m.role === 'user')?.content || '';
+            const body = h('div', { class: 'history-conv__body' });
+            const d = h('details', { class: 'history-conv' + (cv.id === id ? ' is-current' : ''), on: { toggle: () => { if (d.open && !body.childElementCount) body.append(cv.messages.length ? renderThread(cv.messages, {}) : h('p', { class: 'muted', text: 'Opened the chat, sent nothing.' })); } } },
+              h('summary', null,
+                h('span', { class: 'history-conv__when', text: when(cv.started_at) }), statusBadge(cv.status), cv.id === id ? badge('This conversation', 'badge--brand') : null,
+                h('span', { class: 'muted', text: `${said.length} message${said.length === 1 ? '' : 's'}` }),
+                h('div', { class: 'history-conv__first clip', text: cv.summary || first || '(no messages)', title: cv.summary || first })),
+              body);
+            return d;
+          })));
         }));
     }
     if (!c.messages.length) thread.append(empty('No messages', 'The visitor opened the chat but did not send anything.'));
@@ -517,6 +578,15 @@
     const shareBtn = !can('share.create') ? null : h('button', { class: 'btn btn--sm', type: 'button', text: 'Create share link', on: { click: () => openShare(id, c.name, loadShares) } });
     loadShares();
     const lead = c.lead;
+    const rem = remarksBlock(id, c.remarks || [], () => { if (leadSel && leadSel.value === 'new') leadSel.value = 'contacted'; });
+    const leadSel = lead ? leadStatusSelect(lead.id, lead.status) : null;
+    const prevDrawer = live.drawer;
+    live.drawer = (type, d) => {
+      prevDrawer?.(type, d);
+      if ((d.conversation_id || d.id) !== id && d.conversation_id !== id) return;
+      if (type === 'remark.new') rem.add(d); else if (type === 'remark.deleted') rem.remove(d.id);
+      else if (type === 'lead.update' && leadSel && d.status) leadSel.value = d.status;
+    };
     body.replaceChildren(
       h('section', { class: 'card', style: { marginBottom: '16px' } }, h('div', { class: 'card__body' }, h('dl', { class: 'kv' },
         h('dt', { text: 'Mobile' }), h('dd', null, c.phone || '—', ' ', contactBadge(c.phone_type)),
@@ -524,10 +594,12 @@
         h('dt', { text: 'Marketing opt-in' }), h('dd', { text: c.marketing_opt_in ? 'Yes' : 'No' }),
         h('dt', { text: 'First page' }), h('dd', null, c.first_page_url ? h('a', { href: c.first_page_url, target: '_blank', rel: 'noopener', text: c.first_page_url }) : '—'),
         c.summary ? [h('dt', { text: 'Summary' }), h('dd', { text: c.summary })] : null,
+        lead ? [h('dt', { text: 'Lead status' }), h('dd', null, leadSel)] : null,
         lead ? [h('dt', { text: 'Lead' }), h('dd', null, h('div', { class: 'badges' }, (lead.product_interest || []).map((p) => badge(p, 'badge--brand')), lead.demo_requested ? badge('Demo requested', 'badge--brand') : null), lead.need ? h('div', { text: lead.need, style: { marginTop: '4px' } }) : null,
           h('div', { class: 'muted', text: [lead.company, lead.industry, lead.team_size && lead.team_size + ' people', lead.current_system].filter(Boolean).join(' · ') }))] : null,
         c.handoffs.length ? [h('dt', { text: 'Handoffs' }), h('dd', { text: c.handoffs.map((x) => x.reason).join('; ') })] : null,
       ))),
+      rem.box,
       shareBtn ? h('div', { class: 'share-box' }, shareBtn, shareBox) : null,
       tabs.children.length ? tabs : null,
       panel,
@@ -537,35 +609,6 @@
           if (!confirm(`Permanently delete ${c.name}'s details, chats and lead? Use this for Data Privacy Act erasure requests. This cannot be undone.`)) return;
           try { await api('/admin/visitors/' + c.visitor_id, { method: 'DELETE' }); toast('Visitor data deleted'); closeLayer(); route(); } catch (e) { fail(e); }
         } } }), h('span', { class: 'note', style: { marginLeft: '8px' }, text: 'For erasure requests under the Data Privacy Act.' })),
-    );
-  }
-
-  // ---------------- leads ----------------
-  async function pageLeads(opts) {
-    if (!opts?.silent) loading();
-    let rows; try { rows = await api('/admin/leads'); } catch (e) { return fail(e); }
-    if (currentPage() !== 'leads') return;
-    const again = debounce(() => { if (currentPage() === 'leads' && !layer.childElementCount) pageLeads({ silent: true }); }, 1000);
-    live.page = (type) => { if (type === 'lead.update') again(); };
-    const dl = !can('leads.export') ? null : h('button', { class: 'btn', type: 'button', text: 'Download CSV', on: { click: async () => {
-      try { const r = await api('/admin/export/leads.csv', { raw: true }); const url = URL.createObjectURL(await r.blob()); const a = h('a', { href: url, download: `des-leads-${new Date().toISOString().slice(0, 10)}.csv` }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); } catch (e) { fail(e); }
-    } } });
-    main.replaceChildren(
-      top('Leads', 'Visitors who shared a need. Update the status as sales follows up.', dl),
-      h('section', { class: 'card' }, rows.length ? paged(rows, 25, (slice) => h('div', { class: 'table-wrap' }, h('table', null,
-        h('thead', null, h('tr', null, ['Date', 'Visitor', 'Need', 'Products', 'Company', 'Opt-in', 'Status'].map((t) => h('th', { text: t })))),
-        h('tbody', null, slice.map((l) => {
-          const sel = h('select', { class: 'input', 'aria-label': 'Lead status', on: { click: (e) => e.stopPropagation(), change: async (e) => { try { await api('/admin/leads/' + l.id, { method: 'PUT', body: { status: e.target.value } }); toast('Status updated'); } catch (err) { fail(err); } } } },
-            LEAD_STATUSES.map((s) => h('option', { value: s, text: s[0].toUpperCase() + s.slice(1), selected: s === l.status })));
-          return h('tr', { class: 'is-click', on: { click: () => l.conversation_id && openConversation(l.conversation_id) } },
-            h('td', { class: 'muted', text: when(l.created_at), style: { whiteSpace: 'nowrap' } }),
-            h('td', null, h('div', { text: l.name, style: { fontWeight: 600 } }), contactLines(l)),
-            h('td', null, h('div', { class: 'clip', text: l.need || '—', title: l.need || '' }), l.summary ? h('div', { class: 'muted clip', text: l.summary }) : null),
-            h('td', null, h('div', { class: 'badges' }, (l.product_interest || []).map((p) => badge(p, 'badge--brand')), l.demo_requested ? badge('Demo', 'badge--brand') : null)),
-            h('td', null, h('div', { text: l.company || '—' }), h('div', { class: 'muted', text: [l.industry, l.team_size].filter(Boolean).join(' · ') })),
-            h('td', { text: l.marketing_opt_in ? 'Yes' : 'No' }),
-            h('td', null, sel));
-        }))))) : empty('No leads yet', 'DES saves a lead as soon as a visitor explains what they need.')),
     );
   }
 
