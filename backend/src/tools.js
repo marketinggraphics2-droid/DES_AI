@@ -3,6 +3,7 @@
 import { q } from './db.js';
 import { search } from './retrieval.js';
 import { sendHandoff } from './mailer.js';
+import { addMessage } from './log.js';
 
 export const toolDefs = [
   {
@@ -95,6 +96,7 @@ export async function handoff(ctx, reason) {
   if (prev.rowCount) return { already: true };
   await q(`insert into handoffs(conversation_id, reason) values($1,$2)`, [conversationId, reason]);
   await q(`update conversations set status='handed_off' where id=$1`, [conversationId]);
+  await addMessage(conversationId, { role: 'system', kind: 'event', content: 'Handed to Sales: ' + reason }).catch(() => { });
   try {
     await sendHandoff(conversationId, reason);
     await q('update handoffs set emailed_at=now() where conversation_id=$1', [conversationId]);

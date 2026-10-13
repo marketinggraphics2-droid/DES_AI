@@ -38,6 +38,9 @@ export const cfg = {
   chatBanIpHours: num(process.env.CHAT_BAN_IP_HOURS, 1),           // shorter for the internet connection: an office shares one
   chatLlmScreen: process.env.CHAT_LLM_SCREEN !== 'false',        // small-model topic screen on every message
   maxOutputTokens: num(process.env.MAX_OUTPUT_TOKENS, 600),
+  // a returning visitor within this many minutes continues the same conversation instead of starting a new one
+  resumeWindowMin: num(process.env.RESUME_WINDOW_MIN, 30),
+  testHooks: process.env.DES_TEST_HOOKS === '1', // test suite only: lets a request simulate an AI failure or a price in the reply
   dailyBudgetUsd: num(process.env.DAILY_BUDGET_USD, 20),
   // Fallback $/1M tokens for the cost meter, used only when IQGateway's x_gateway cost is missing
   price: { in: 0.1, out: 0.4, cacheRead: 0.025 }, // fallback only; normally the gateway's x_gateway.costUSD is used. Check gemini-3.5-flash-lite pricing

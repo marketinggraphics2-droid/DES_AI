@@ -173,7 +173,7 @@ sec('7. Sessions and auth');
 if (want('auth')) await guard('auth', async () => {
   const id = ident(); const s = await A.session(id);
   let r = await A.req('POST', '/api/session/resume', { body: { lang: 'en' }, token: s.token, id });
-  ok('returning visitor resumes with a new conversation', r.status === 200 && r.json.session_id !== s.json.session_id);
+  ok('returning visitor (within 30 min) resumes the same conversation', r.status === 200 && r.json.session_id === s.json.session_id && !!r.json.token, r.text);
   let c = await A.chat(r.json.token, 'our SAP is not working, error on login', id); ok('resumed session can chat', !!c.done);
   r = await A.req('POST', '/api/chat', { body: { message: 'hi' }, token: 'not-a-real-token', id });
   ok('invalid token → 401', r.status === 401);
@@ -232,6 +232,78 @@ if (want('golden')) await guard('golden', async () => {
   ok('product list shows notes + answers', prods.find((p) => p.product === 'IQ Barcode')?.has_notes === true && prods.find((p) => p.product === 'IQ People')?.approved_total >= 1);
   r = await A.req('DELETE', '/api/admin/golden/' + gid, { admin: true });
   ok('approved answer deleted', r.status === 200 && !(await A.req('GET', '/api/admin/golden', { admin: true })).json.some((g) => String(g.id) === String(gid)));
+});
+
+// =====================================================================================
+sec('9b. Conversation capture (everything the visitor sees or sends is stored, in order)');
+if (want('capture')) await guard('capture', async () => {
+  const detail = async (cid) => (await A.req('GET', `/api/admin/conversations/${cid}/detail`, { admin: true })).json;
+  const id = ident();
+  // sign-up transcript (shown before a session exists) is sent with POST /session and stored first
+  const email = uniqueEmail('cap');
+  const transcript = [
+    { role: 'user', content: 'Do you handle BIR CAS?', held: true },
+    { role: 'assistant', content: 'Happy to help with that! Before I answer, a quick formality…' },
+    { role: 'user', content: 'yes' },
+    { role: 'assistant', content: "Great, thanks. What's your name?" },
+    { role: 'user', content: 'Ana Reyes' },
+    { role: 'assistant', content: 'Nice to meet you, Ana. Where can our team reach you?' },
+    { role: 'user', content: email },
+  ];
+  const s = await A.session(id, { contact: email, transcript });
+  ok('session created with a sign-up transcript', s.status === 200, s.text);
+  const cid = s.json?.session_id;
+  let d = await detail(cid);
+  const seqs = (d?.messages || []).map((m) => m.seq);
+  ok('sign-up messages stored in order, before any chat', d?.messages?.length >= 7 && d.messages[0].content === 'Do you handle BIR CAS?' && /formality/.test(d.messages[1].content), (d?.messages || []).map((m) => m.role[0] + ':' + m.content.slice(0, 20)).join(' | '));
+  ok('messages carry a strictly increasing per-conversation sequence', seqs.length > 0 && seqs.every((x, i) => i === 0 || x > seqs[i - 1]), seqs.join(','));
+  ok('sign-up rows marked as scripted (kept out of the AI history)', d.messages.slice(1).length >= 6 && d.messages.slice(1).every((m) => m.kind === 'script'));
+  ok('contact typed during sign-up is never stored in messages', !d.messages.some((m) => m.content.includes(email)) && d.messages.some((m) => m.content === '[email]'));
+  // the held question is answered by /chat without a duplicate user row
+  let c = await A.chat(s.token, 'Do you handle BIR CAS?', id, { held: true, prefix: 'Thanks, Ana. ' });
+  d = await detail(cid);
+  ok('held question answered without a duplicate user row', d.messages.filter((m) => m.role === 'user' && m.content === 'Do you handle BIR CAS?').length === 1 && !!c.done, d.messages.length);
+  ok('stored reply includes the greeting the visitor saw', d.messages.filter((m) => m.role === 'assistant').at(-1)?.content.startsWith('Thanks, Ana.'));
+  // widget-only bubbles (survey, trouble, handoff confirmation…) are logged
+  let r = await A.req('POST', '/api/log', { token: s.token, id, body: { items: [{ role: 'assistant', content: 'If you have a moment, I’d love to hear how this went.' }, { role: 'user', content: 'call me at 0917 555 0132 or ana@acme.ph' }, { role: 'assistant', content: 'Thanks, Ana!' }] } });
+  ok('widget bubbles accepted by /api/log', r.status === 200, r.text);
+  d = await detail(cid);
+  ok('logged bubbles stored at the end, in order', /hear how this went/.test(d.messages.at(-3)?.content) && d.messages.at(-1)?.content === 'Thanks, Ana!', d.messages.slice(-3).map((m) => m.content).join(' | '));
+  ok('contact details in logged widget text are masked', /\[phone\]/.test(d.messages.at(-2)?.content) && /\[email\]/.test(d.messages.at(-2)?.content), d.messages.at(-2)?.content);
+  r = await A.req('POST', '/api/log', { token: s.token, id, body: { items: Array.from({ length: 30 }, () => ({ role: 'assistant', content: 'x' })) } });
+  ok('/api/log refuses oversized batches', r.status === 400);
+  // two messages sent at nearly the same time stay paired and in order
+  const [c1, c2] = await Promise.all([A.chat(s.token, 'our SAP is not working, error on login', id), A.chat(s.token, 'our SAP is still down since morning, error on login', id)]);
+  d = await detail(cid);
+  const tail = d.messages.slice(-4).map((m) => m.role);
+  ok('concurrent messages stored as user, reply, user, reply', !!c1.done && !!c2.done && tail.join(',') === 'user,assistant,user,assistant', tail.join(','));
+  // early-return paths keep the visitor's message and the reply they saw
+  c = await A.chat(s.token, 'y'.repeat(1100), id);
+  d = await detail(cid);
+  ok('over-long message: visitor text and the refusal both stored', d.messages.at(-2)?.role === 'user' && d.messages.at(-2).content.length >= 1000 && d.messages.at(-1)?.blocked_reason === 'too_long');
+  // a guardrail replacement keeps the original text the visitor watched stream in
+  c = await A.chat(s.token, 'What is IQ Barcode?', id, { hook: { 'x-des-test-append': ' It costs PHP 25,000 per user.' } });
+  d = await detail(cid);
+  const rep = d.messages.at(-1);
+  ok('guardrail replacement: replacement shown, original kept', rep?.blocked_reason === 'price' && /25,000/.test(rep.original_content || ''), `${rep?.blocked_reason} / ${(rep?.original_content || '').slice(-40)}`);
+  // a server error mid-reply keeps the partial reply, marked incomplete
+  c = await A.chat(s.token, 'What is IQ People?', id, { hook: { 'x-des-test-fail': 'midstream' } });
+  d = await detail(cid);
+  const part = d.messages.filter((m) => m.role === 'assistant').at(-1);
+  ok('error mid-reply: partial reply stored as incomplete', c.error?.code === 'llm_error' && part?.incomplete === true && part.content.length > 0, `${c.error?.code} incomplete=${part?.incomplete} "${(part?.content || '').slice(0, 40)}"`);
+  // the visitor leaves mid-reply: partial stored, marked not delivered
+  const ac = new AbortController();
+  const resp = await fetch(base + '/api/chat', { method: 'POST', signal: ac.signal, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + s.token, 'cf-connecting-ip': id.ip, 'x-des-device': id.dev, origin: base }, body: JSON.stringify({ message: 'Tell me about SAP Business One for a distribution company' }) });
+  const rd = resp.body.getReader(); await rd.read(); ac.abort();
+  ok('aborted reply stored as incomplete + not delivered', await until(async () => { const m = (await detail(cid)).messages.filter((x) => x.role === 'assistant').at(-1); return m?.incomplete === true && m?.delivered === false; }, 30000, 300));
+  // a returning visitor continues the same conversation instead of splitting the visit
+  r = await A.req('POST', '/api/session/resume', { body: { lang: 'en' }, token: s.token, id });
+  ok('resume within 30 minutes continues the same conversation', r.status === 200 && r.json.session_id === cid, `${r.json?.session_id} vs ${cid}`);
+  // the same person signing up again is linked
+  const id2 = ident(); const s2 = await A.session(id2, { contact: email, name: 'Capture Tester' });
+  await A.chat(s2.token, 'our SAP is not working, error on login', id2); // a message, so the chat is listed
+  const h = (await A.req('GET', `/api/admin/conversations/${s2.json.session_id}/history`, { admin: true })).json;
+  ok('visitor history joins both sign-ups of the same person', h?.conversations?.length >= 2 && h.conversations.some((x) => x.id === cid), JSON.stringify((h?.conversations || []).map((x) => x.id.slice(0, 8))));
 });
 
 // =====================================================================================
@@ -323,7 +395,7 @@ if (want('widget')) await guard('widget', async () => {
   const wid = ident();
   W = await widget(base, { id: wid, cfg: 'idleSurveyMs: 900000' }); await W.open(); // long flow: keep the idle survey from opening on its own
   let r = await W.say('Do you handle BIR CAS for a trading company?');
-  ok('asks for consent before answering', /formality|Privacy Notice/i.test(W.bots().join(' ')));
+  ok('asks for consent before answering', /formality|Privacy Notice/i.test(W.bots().join(' ')), W.bots().join(' | ').slice(-200) + ' ev=' + W.w.DES.data.events.map((e) => e.type).join(','));
   ok('consent: text box locked until "I agree" is tapped', W.input.disabled && /Choose an option/i.test(W.input.placeholder), W.input.placeholder);
   const before = W.bots().length; W.input.value = 'hello'; W.input.dispatchEvent(new W.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await sleep(400);
   ok('consent: typed text is ignored while the choice is pending', W.bots().length === before);
@@ -370,7 +442,12 @@ if (want('widget')) await guard('widget', async () => {
   await W.chip(/^\s*Yes/); ok('survey answered: text box unlocked', await until(() => !W.input.disabled, 6000));
   // session erased on the server mid-chat → recovers instead of erroring
   const conv = (await A.req('GET', '/api/admin/conversations?q=Lea&limit=5', { admin: true })).json[0];
-  const det = (await A.req('GET', `/api/admin/conversations/${conv.id}/detail`, { admin: true })).json;
+  let det;
+  const whole = await until(async () => { det = (await A.req('GET', `/api/admin/conversations/${conv.id}/detail`, { admin: true })).json; return det.messages.some((m) => /Did you find/i.test(m.content)); }, 8000, 300);
+  const idx = (re, role) => det.messages.findIndex((m) => (!role || m.role === role) && re.test(m.content));
+  ok('dashboard shows the whole widget conversation (greeting, sign-up, held question, answer, survey)', whole && idx(/^Hi there/) === 0 && idx(/BIR CAS for a trading company/, 'user') < idx(/formality/) && idx(/formality/) < idx(/Thanks, Lea/, 'assistant') && idx(/Did you find/) > idx(/Thanks, Lea/, 'assistant'),
+    det.messages.map((m) => m.role[0] + ':' + m.content.slice(0, 18)).join(' | ').slice(0, 300));
+  ok('dashboard never shows the contact the visitor typed', !det.messages.some((m) => m.content.includes(viber.slice(-7))));
   await A.req('DELETE', '/api/admin/visitors/' + det.visitor_id, { admin: true });
   r = await W.say('one more question about BIR CAS');
   ok('erased session → "session expired, start again", onboarding restarts', W.bots().some((b) => /session expired/i.test(b)) && !/Chatting as/.test(W.status()), W.status());
@@ -379,7 +456,7 @@ if (want('widget')) await guard('widget', async () => {
   const tid = ident();
   W = await widget(base, { id: tid }); await W.open();
   await onboard(W, 'Marco Diaz', uniqueEmail('marco'));
-  r = await W.say('gago ka ba'); await W.waitIdle(); ok('widget strike 1: redirect', /here to help|Nandito ako/i.test(W.bots().at(-1)));
+  r = await W.say('gago ka ba'); await W.waitIdle(); ok('widget strike 1: redirect', /here to help|Nandito ako/i.test(W.bots().at(-1)), W.bots().slice(-3).join(' | ').slice(-240) + ' ev=' + W.w.DES.data.events.filter((e) => /error|session/.test(e.type)).map((e) => e.type + ':' + (e.message || '')).join(','));
   r = await W.say('pano magluto ng adobo'); await W.waitIdle(); ok('widget strike 2: warning', /end this chat|tapusin/i.test(W.bots().at(-1)));
   r = await W.say('tara inom tayo mamaya'); await W.waitIdle();
   ok('widget strike 3: chat ended, text box locked with end time', W.input.disabled && /ended/i.test(W.input.placeholder) && /until/i.test(W.input.placeholder), W.input.placeholder);
@@ -419,6 +496,17 @@ if (want('dashboard')) await guard('dashboard', async () => {
   ok('website pages: search resets to one short page', !P.$('.pager') || /^1–/.test(P.$('.pager__info').textContent));
   await go('#/finetune/IQ%20People');
   for (const tab of ['questions', 'notes', 'pages', 'answers']) { P.$(`.ptabs button[data-tab="${tab}"]`).click(); await sleep(150); ok('fine-tune tab: ' + tab, P.$('[role=tabpanel]').textContent.length > 20); }
+  if (want('capture')) {
+    await go('#/conversations'); const sb = P.$('#main input[type=search]'); sb.value = 'Capture Tester'; sb.dispatchEvent(new P.w.Event('input'));
+    await until(() => P.$$('tbody tr.is-click').length === 1, 8000); P.$('tr.is-click').click();
+    await until(() => P.$('.drawer [data-tab="history"]'), 8000);
+    ok('drawer offers the visitor history of the same person', !!P.$('.drawer [data-tab="history"]'));
+    P.$('.drawer [data-tab="history"]')?.click();
+    ok('visitor history shows every chat of the person, oldest first, sign-up bubbles in grey', await until(() => P.$$('.drawer .history-conv').length >= 2 && P.$$('.drawer .msg--script').length >= 5, 8000), P.$$('.drawer .history-conv').length + ' chats');
+    ok('incomplete and guardrail-replaced replies are flagged', P.$$('.drawer .badge').some((b) => /Cut short/.test(b.textContent)) && !!P.$('.drawer .msg__orig'));
+    P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
+    sb.value = ''; sb.dispatchEvent(new P.w.Event('input')); await until(() => P.$$('tbody tr.is-click').length > 1, 8000);
+  }
   await go('#/conversations'); P.$('tr.is-click').click(); await until(() => P.$('.drawer .thread'), 8000);
   ok('conversation drawer opens with messages', P.$$('.drawer .msg').length > 0);
   P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100); ok('Escape closes it', !P.$('.drawer'));

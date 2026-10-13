@@ -238,8 +238,8 @@
   // random per-device id so a ban after an ended chat follows the device, not just the contact
   let deviceId = store.get('device', null);
   if (!deviceId) { deviceId = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).toLowerCase(); store.set('device', deviceId); }
-  const http = async (path, body, { stream = false } = {}) => {
-    const r = await fetch(apiBase + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-des-device': deviceId, ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body || {}) });
+  const http = async (path, body, { stream = false, signal } = {}) => {
+    const r = await fetch(apiBase + path, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-des-device': deviceId, ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body || {}) });
     if (!r.ok) {
       const e = new Error('api ' + r.status); try { e.body = await r.json(); } catch { }
       if (r.status === 401 && path !== '/session') { token = null; store.del('token'); e.sessionGone = true; } // expired or unknown session
@@ -277,21 +277,52 @@
   };
   const realApi = {
     async session(v) {
-      const j = await http('/session', { name: v.name, contact: v.contact, contact_type: v.contact_type, consent: v.consent, marketing_opt_in: v.marketing_opt_in, lang: S.lang, page_url: location.href, turnstile: window.__turnstileToken || null });
+      const transcript = outbox.slice(0, 40);
+      const j = await http('/session', { name: v.name, contact: v.contact, contact_type: v.contact_type, consent: v.consent, marketing_opt_in: v.marketing_opt_in, lang: S.lang, page_url: location.href, turnstile: window.__turnstileToken || null, transcript });
+      outbox.length = 0; // stored with the session (anything past 40 bubbles is dropped)
       token = j.token; store.set('token', token); data.conversation.id = j.session_id; emit('session.create', { visitor: v, session_id: j.session_id }); return j;
     },
     async resume() { try { const j = await http('/session/resume', { lang: S.lang }); token = j.token; store.set('token', token); data.conversation.id = j.session_id; return true; } catch { token = null; store.del('token'); return false; } },
-    async chat(msg) {
-      const res = await http('/chat', { message: msg }, { stream: true });
+    async chat(msg, { held, prefix, signal } = {}) {
+      await flushLog();
+      const res = await http('/chat', { message: msg, ...(held ? { held: true, prefix } : {}) }, { stream: true, signal });
       const out = await readSSE(res, null, (ev) => { if (ev.type === 'lead') { data.lead = { ...(data.lead || {}), product_interest: ev.product_interest }; emit('lead.save', { lead: data.lead }); } if (ev.type === 'handoff') { data.handoffs.push({ reason: ev.reason, at: new Date().toISOString() }); emit('handoff', ev); } });
       return { ended: out.ended, until: out.until, message_id: out.message_id, text: fmt(out.text), handoffOffer: out.blocked === 'trouble' || out.blocked?.includes?.('claim'), blocked: out.blocked };
     },
     async saveLead() { },
-    async handoff(reason) { await http('/handoff', { reason }); data.handoffs.push({ reason, at: new Date().toISOString() }); emit('handoff', { reason }); },
+    async handoff(reason) { await flushLog(); await http('/handoff', { reason }); data.handoffs.push({ reason, at: new Date().toISOString() }); emit('handoff', { reason }); },
     async feedback(f) { await http('/feedback', f); data.feedback.push({ ...f, at: new Date().toISOString() }); emit('feedback', f); },
-    async end() { try { await http('/end', {}); } catch { } }
+    async end() { try { await flushLog(); await http('/end', {}); } catch { } }
   };
   const api = apiBase ? realApi : mockApi;
+
+  // ---------- conversation log ----------
+  // Every bubble the visitor sees and every message or choice they send must reach the dashboard. AI questions and
+  // answers are stored by the server; everything else (greeting, sign-up, survey, notices) is queued here and sent
+  // with POST /session (what happened before sign-up), then via /log. Nothing is stored before sign-up finishes.
+  const outbox = [];
+  let flushing = Promise.resolve(), flushTimer = null;
+  function logItem(role, content, extra) {
+    if (!apiBase || !content) return;
+    outbox.push({ role, content: String(content).slice(0, 1000), ...(extra || {}) });
+    if (outbox.length > 60) outbox.splice(1, 1); // before sign-up: keep the first (held) question
+    clearTimeout(flushTimer); flushTimer = setTimeout(() => { flushLog(); }, 400);
+  }
+  function flushLog() {
+    flushing = flushing.then(async () => {
+      while (token && outbox.length) {
+        const items = outbox.slice(0, 20);
+        try { await http('/log', { items }); } catch (e) { if (e.sessionGone) outbox.length = 0; return; } // otherwise retry on the next flush
+        outbox.splice(0, items.length);
+      }
+    });
+    return flushing;
+  }
+  // page closing: the last bubbles go with sendBeacon (text/plain, so no CORS pre-check; the token rides in the body)
+  window.addEventListener('pagehide', () => {
+    if (!apiBase || !token || !outbox.length || !navigator.sendBeacon) return;
+    navigator.sendBeacon(apiBase + '/log', new Blob([JSON.stringify({ token, items: outbox.splice(0, 20) })], { type: 'text/plain' }));
+  });
 
   // ---------- mock "LLM" (keyword KB, layman's terms) ----------
   const MOCK = {
@@ -394,9 +425,12 @@
   // ---------- rendering ----------
   const mini = () => `<span class="dq-chat__mini"><img src="${CFG.logoUrl}" alt="" width="16" height="16"></span>`;
   function scroll() { body.scrollTo({ top: body.scrollHeight, behavior: 'smooth' }); }
-  function addUser(text) {
+  /** log: false when the server stores it (sent to /chat); a string logs a stand-in instead (contact details). */
+  function addUser(text, { log = true, held = false } = {}) {
     const m = el('div', 'dq-chat__msg is-user', `<div class="dq-chat__bubble">${esc(text)}<time>${now()}</time></div>`);
-    body.append(m); scroll(); data.conversation.messages.push({ role: 'user', text, at: new Date().toISOString() }); return m;
+    body.append(m); scroll(); data.conversation.messages.push({ role: 'user', text, at: new Date().toISOString() });
+    if (log) logItem('user', typeof log === 'string' ? log : text, held ? { held: true } : null);
+    return m;
   }
   function addSystem(text) { body.append(el('div', 'dq-chat__msg is-system', `<div class="dq-chat__bubble">${text}</div>`)); scroll(); }
   let typingEl = null;
@@ -414,7 +448,8 @@
     if (opts.chips) {
       const c = el('div', 'dq-chat__chips' + (opts.chipsCls ? ' ' + opts.chipsCls : ''));
       c.setAttribute('aria-label', 'Options');
-      opts.chips.forEach(ch => { const bt = el('button', ch.cls || null, ch.label); bt.type = 'button'; bt.onclick = () => { if (c.classList.contains('is-done')) return; c.classList.add('is-done'); bt.classList.add('is-picked'); if (opts.lock && !ch.keepLock) unlockChoice(); ch.on && ch.on(ch.label, bt); }; c.append(bt); });
+      // a tapped choice is something the visitor sent; chips that send their label as a message are logged by send()
+      opts.chips.forEach(ch => { const bt = el('button', ch.cls || null, ch.label); bt.type = 'button'; bt.onclick = () => { if (c.classList.contains('is-done')) return; c.classList.add('is-done'); bt.classList.add('is-picked'); if (opts.lock && !ch.keepLock) unlockChoice(); if (!ch.sends) logItem('user', '[' + bt.textContent.trim() + ']'); ch.on && ch.on(ch.label, bt); }; c.append(bt); });
       b.append(c);
     }
     m.innerHTML = mini(); m.append(b);
@@ -422,6 +457,7 @@
     body.append(m); scroll();
     if (opts.lock && opts.chips) lockForChoice();
     data.conversation.messages.push({ role: 'assistant', id: opts.id || null, text: b.textContent.trim(), at: new Date().toISOString(), scripted: !opts.feedback });
+    if (!opts.serverStored) logItem('assistant', b.textContent.replace(/\s+/g, ' ').trim());
     return m;
   }
   function attachThumbs(m, bubble, id) {
@@ -515,23 +551,25 @@
     store.set('visitor', { ...data.visitor, saved_at: Date.now() });
     setStatus();
     const held = S.held; S.held = null;
-    if (held) await answer(held, S.t.thanksGo(esc(data.visitor.first))); // stays locked straight into the answer
+    if (held) await answer(held, S.t.thanksGo(esc(data.visitor.first)), true); // stays locked straight into the answer
     else setBusy(false);
   }
 
 
   // ---------- main answer path ----------
-  async function answer(text, prefix = '') {
+  async function answer(text, prefix = '', held = false) {
     setBusy(true);
+    const ac = typeof AbortController === 'function' ? new AbortController() : null;
     try {
-      const r = await Promise.race([api.chat(text), sleep(20000).then(() => { throw new Error('timeout'); })]);
+      // after 20 s give up and cancel the request, so the server records the reply as not delivered
+      const r = await Promise.race([api.chat(text, { held, prefix, signal: ac?.signal }), sleep(20000).then(() => { ac?.abort(); throw new Error('timeout'); })]);
       S.botAnswers++;
       if (r.handoff) { await addBot((prefix || r.text || '') + (S.lang === 'fil' ? 'Ikokonekta kita sa isang sales consultant.' : "I'll connect you with one of our sales consultants."), { time: false }); return handoff(r.handoff); }
       const id = r.message_id ?? ('m_' + Date.now()); // numeric id from the server links thumbs to this reply
-      const chips = (r.chips || []).map(l => ({ label: l, on: (lab) => send(lab) }));
+      const chips = (r.chips || []).map(l => ({ label: l, sends: true, on: (lab) => send(lab) }));
       if (r.handoffOffer) chips.push({ label: S.t.connect, cls: 'is-primary', on: () => handoff('model') });
-      if (r.ended) { await addBot(prefix + r.text, { time: true }); return endChat(r.until); }
-      await addBot(prefix + r.text, { chips: chips.length ? chips : null, feedback: !r.blocked, id });
+      if (r.ended) { await addBot(prefix + r.text, { time: true, serverStored: !!apiBase }); return endChat(r.until); }
+      await addBot(prefix + r.text, { chips: chips.length ? chips : null, feedback: !r.blocked, id, serverStored: !!apiBase });
       if (chips.length) body.lastElementChild.querySelector('.dq-chat__bubble').append(el('time', null, now()));
       armIdle();
     } catch (e) {
@@ -592,11 +630,12 @@
     input.value = '';
     if (S.step === 'idle') setLang(isFil(text) ? 'fil' : 'en');
     if (PII.test(text) && S.step === 'done') { addUser(text.replace(PII, '[redacted]')); await addBot("Please don't share card, TIN or ID numbers here — I've hidden it. How else can I help?"); return; }
-    addUser(text);
-    if (S.pending) { const p = S.pending; S.pending = null; return p(text); }
-    if (S.step === 'idle') { if (data.visitor) { S.step = 'done'; return answer(text); } return startOnboarding(text); }
-    if (S.step !== 'done') return onboardingInput(text);
-    if (BYE.test(text) && !S.surveyDone) return survey('goodbye');
+    if (S.pending) { addUser(text); const p = S.pending; S.pending = null; return p(text); }
+    if (S.step === 'idle') { if (data.visitor) { S.step = 'done'; addUser(text, { log: false }); return answer(text); } addUser(text, { held: true }); return startOnboarding(text); }
+    // contact details live only in the visitor record: the log gets a stand-in
+    if (S.step !== 'done') { addUser(text, { log: S.step === 'contact' ? (text.includes('@') ? '[email]' : '[phone]') : true }); return onboardingInput(text); }
+    if (BYE.test(text) && !S.surveyDone) { addUser(text); return survey('goodbye'); }
+    addUser(text, { log: false });
     return answer(text);
   }
   sendBtn.addEventListener('click', () => send());
@@ -604,6 +643,7 @@
 
   async function reset(opts = {}) {
     clearOnboardTimer();
+    await flushLog(); outbox.length = 0; // what was already said stays with the old session
     if (banActive()) { addBot(S.t.endedNotice(untilText(banActive())), { time: false }); return endChat(banActive()); }
     store.del('visitor'); data.visitor = null; S.step = 'idle'; S.held = null; S.ended = false; S.awaitChoice = false; root.classList.remove('is-ended'); input.disabled = false; sendBtn.disabled = false; S.surveyDone = false; S.surveyOpen = false; S.botAnswers = 0; S.contactTries = 0; S.askedWorkEmail = false; S.pendingEmail = null;
     updatePlaceholder();
@@ -614,9 +654,9 @@
   async function greet() {
     const t = S.t;
     if (banActive()) { await addBot(t.endedNotice(untilText(banActive())), { time: false }); return endChat(banActive()); }
-    if (data.visitor) { S.step = 'done'; await addBot(t.welcomeBack(data.visitor.first), { chips: t.chips.map(l => ({ label: l, on: (lab) => send(lab) })) }); return; }
+    if (data.visitor) { S.step = 'done'; await addBot(t.welcomeBack(data.visitor.first), { chips: t.chips.map(l => ({ label: l, sends: true, on: (lab) => send(lab) })) }); return; }
     await addBot(t.hello, { time: false });
-    await addBot(t.what, { chips: t.chips.map(l => ({ label: l, on: (lab) => send(lab) })) });
+    await addBot(t.what, { chips: t.chips.map(l => ({ label: l, sends: true, on: (lab) => send(lab) })) });
   }
 
   // ---------- boot ----------

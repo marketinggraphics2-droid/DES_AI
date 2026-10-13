@@ -15,6 +15,7 @@ export const adminRouter = Router();
 const GENERAL = 'General'; // approved answers / questions not tied to one product
 const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'closed'];
 
+const MSG_COLS = 'id, seq, role, kind, source, content, original_content, incomplete, delivered, tool_name, tool_input, blocked_reason, product, golden_ids, tokens_in, tokens_out, created_at';
 adminRouter.use((req, res, next) => {
   const tok = (req.headers.authorization || '').replace(/^Bearer /, '');
   if (cfg.adminToken && tok === cfg.adminToken) return next();
@@ -75,7 +76,7 @@ adminRouter.get('/activity', wrap(async (req, res) => {
   const limit = Math.min(100, parseInt(req.query.limit, 10) || 40);
   const rows = (await q(`
     (select 'conversation' as type, c.started_at as at, v.name as who, c.id as conversation_id, c.status as status,
-            coalesce(c.summary, (select m.content from messages m where m.conversation_id=c.id and m.role='user' order by m.id limit 1)) as detail
+            coalesce(c.summary, (select m.content from messages m where m.conversation_id=c.id and m.role='user' and m.kind='chat' order by m.seq, m.id limit 1)) as detail
        from conversations c join visitors v on v.id=c.visitor_id where c.turns > 0 order by c.started_at desc limit 25)
     union all
     (select 'lead', l.updated_at, v.name, l.conversation_id, case when l.demo_requested then 'demo' else l.status end,
@@ -103,7 +104,7 @@ adminRouter.get('/conversations', wrap(async (req, res) => {
   const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
   const rows = (await q(`
     select c.id, c.started_at, c.ended_at, c.status, c.lang, c.turns, c.summary, v.name, v.contact, v.contact_type,
-      (select m.content from messages m where m.conversation_id=c.id and m.role='user' order by m.id limit 1) first_question,
+      (select m.content from messages m where m.conversation_id=c.id and m.role='user' and m.kind='chat' order by m.seq, m.id limit 1) first_question,
       (select array_agg(distinct m.product) from messages m where m.conversation_id=c.id and m.product is not null) products,
       exists(select 1 from leads l where l.conversation_id=c.id) has_lead,
       exists(select 1 from leads l where l.conversation_id=c.id and l.demo_requested) demo,
@@ -128,14 +129,25 @@ adminRouter.get('/conversations', wrap(async (req, res) => {
 adminRouter.get('/conversations/:id/detail', wrap(async (req, res) => {
   const conv = (await q(`select c.*, v.name, v.contact, v.contact_type, v.marketing_opt_in, v.first_page_url from conversations c join visitors v on v.id=c.visitor_id where c.id=$1`, [req.params.id])).rows[0];
   if (!conv) return res.status(404).json({ error: 'not_found' });
-  const messages = (await q(`select id, role, content, tool_name, tool_input, blocked_reason, product, golden_ids, tokens_in, tokens_out, created_at
-                             from messages where conversation_id=$1 order by id`, [req.params.id])).rows;
+  const messages = (await q(`select ${MSG_COLS} from messages where conversation_id=$1 order by seq, id`, [req.params.id])).rows;
   const ids = [...new Set(messages.flatMap((m) => m.golden_ids || []).map(Number))];
   const golden = ids.length ? (await q('select id, question, product from golden_answers where id = any($1::bigint[])', [ids])).rows : [];
   const feedback = (await q('select * from feedback where conversation_id=$1 order by id', [req.params.id])).rows;
   const lead = (await q('select * from leads where conversation_id=$1', [req.params.id])).rows[0] || null;
   const handoffs = (await q('select * from handoffs where conversation_id=$1 order by id', [req.params.id])).rows;
-  res.json({ ...conv, contact: decrypt(conv.contact), messages, golden, feedback, lead, handoffs });
+  const others = (await q(`select count(*)::int n from conversations c join visitors v on v.id=c.visitor_id
+                           where c.id <> $1 and (c.visitor_id = $2 or (v.person_key is not null and v.person_key = (select person_key from visitors where id=$2)))`, [req.params.id, conv.visitor_id])).rows[0].n;
+  res.json({ ...conv, contact: decrypt(conv.contact), messages, golden, feedback, lead, handoffs, other_conversations: others });
+}));
+
+// Everything the same person said across visits and sign-ups (same visitor, or same contact on a new sign-up), oldest first.
+adminRouter.get('/conversations/:id/history', wrap(async (req, res) => {
+  const me = (await q('select v.id, v.person_key, v.name from conversations c join visitors v on v.id=c.visitor_id where c.id=$1', [req.params.id])).rows[0];
+  if (!me) return res.status(404).json({ error: 'not_found' });
+  const convs = (await q(`select c.id, c.started_at, c.ended_at, c.status, c.summary, v.name from conversations c join visitors v on v.id=c.visitor_id
+                          where c.visitor_id = $1 or ($2::text is not null and v.person_key = $2) order by c.started_at`, [me.id, me.person_key])).rows;
+  const msgs = convs.length ? (await q(`select conversation_id, ${MSG_COLS} from messages where conversation_id = any($1::uuid[]) order by seq, id`, [convs.map((c) => c.id)])).rows : [];
+  res.json({ name: me.name, conversations: convs.map((c) => ({ ...c, messages: msgs.filter((m) => m.conversation_id === c.id) })) });
 }));
 
 adminRouter.put('/leads/:id', wrap(async (req, res) => {

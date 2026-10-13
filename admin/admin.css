@@ -255,3 +255,15 @@ td .muted, .muted { color: var(--ink-3); }
   .hbar { grid-template-columns: 96px 1fr 36px; }
   .kv { grid-template-columns: 1fr; }
 }
+
+/* conversation capture: scripted widget messages, notices, cut-short replies, visitor history */
+.msg--script .msg__b { background: var(--surface-2); color: var(--ink-2); border: 1px dashed var(--line); }
+.msg--user.msg--script .msg__b { background: var(--surface-2); color: var(--ink-2); }
+.msg--event { justify-self: center; max-width: 100%; font-size: 12px; color: var(--ink-3); background: var(--surface-2); border-radius: 99px; padding: 3px 12px; }
+.msg__orig { margin-top: 6px; font-size: 12px; color: var(--ink-3); }
+.msg__orig summary { cursor: pointer; }
+.msg__orig > div { margin-top: 4px; padding: 8px 10px; border-left: 3px solid var(--bad); background: var(--bad-bg); border-radius: 4px; }
+.day-sep { display: flex; gap: 8px; align-items: center; margin: 18px 0 10px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.day-sep::before, .day-sep::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.history-conv.is-current .thread { outline: 2px solid var(--brand-line); outline-offset: 6px; border-radius: 6px; }
+.check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-2); white-space: nowrap; }

@@ -80,12 +80,13 @@ function buildBody({ model, system, messages, maxTokens, stream, withTools }) {
   return body;
 }
 
-async function post(body) {
+async function post(body, signal) {
+  const timeout = AbortSignal.timeout(cfg.gateway.timeoutMs);
   const res = await fetch(`${cfg.gateway.url}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${cfg.gateway.key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(cfg.gateway.timeoutMs),
+    signal: signal ? AbortSignal.any([timeout, signal]) : timeout, // signal: the visitor left, stop paying for the reply
   });
   if (!res.ok) throw new GatewayError(res.status, await res.text().catch(() => ''));
   return res;
@@ -106,8 +107,8 @@ const readUsage = (u) => ({
 });
 
 /** Streams one completion. Returns {text, toolCalls:[{id,name,arguments}], finish, usage, usd}. */
-async function streamOnce(body, onText) {
-  const res = await post(body);
+async function streamOnce(body, onText, signal) {
+  const res = await post(body, signal);
   const dec = new TextDecoder();
   let buf = '', text = '', finish = null, usage = { in: 0, out: 0, cache: 0 }, usd = null;
   const calls = [];
@@ -160,10 +161,12 @@ async function complete({ model, system, user, maxTokens }) {
  * @param {object} p.ctx               {conversationId, visitorId}
  * @param {(delta:string)=>void} p.onText
  * @param {(ev:object)=>void}  p.onEvent
+ * @param {(t:{name:string,input:object,output:string})=>Promise<void>} [p.onTool]  called after each tool runs (stored right away)
+ * @param {AbortSignal} [p.signal]     aborts the gateway call (visitor disconnected)
  * @returns {Promise<{text:string, usage:{in:number,out:number,cache:number}, toolCalls:Array}>}
  */
-export async function answer({ system, history, userTurn, ctx, onText, onEvent, dry = false }) {
-  if (isMock()) return mockAnswer({ userTurn, ctx, onText, onEvent, dry });
+export async function answer({ system, history, userTurn, ctx, onText, onEvent, onTool, signal, dry = false }) {
+  if (isMock()) return mockAnswer({ userTurn, ctx, onText, onEvent, onTool, dry });
 
   const messages = [...history, { role: 'user', content: userTurn }];
   const usage = { in: 0, out: 0, cache: 0 };
@@ -173,7 +176,7 @@ export async function answer({ system, history, userTurn, ctx, onText, onEvent, 
 
   try {
     for (let round = 0; round < 4; round++) {
-      const r = await streamOnce(buildBody({ model: cfg.model, system, messages, maxTokens: cfg.maxOutputTokens, stream: true, withTools: !dry }), onText);
+      const r = await streamOnce(buildBody({ model: cfg.model, system, messages, maxTokens: cfg.maxOutputTokens, stream: true, withTools: !dry }), onText, signal);
       usage.in += r.usage.in; usage.out += r.usage.out; usage.cache += r.usage.cache;
       if (r.usd === null) usdKnown = false; else usd += r.usd;
       finalText += r.text;
@@ -193,6 +196,7 @@ export async function answer({ system, history, userTurn, ctx, onText, onEvent, 
         try { out = await runTool(c.name, input, ctx); }
         catch (e) { out = { result: `Tool error: ${e.message}` }; }
         toolCalls.push({ name: c.name, input, output: out.result });
+        await onTool?.({ name: c.name, input, output: out.result });
         if (out.event) onEvent?.(out.event);
         messages.push({ role: 'tool', tool_call_id: c.id, content: String(out.result ?? '') });
       }
@@ -229,7 +233,7 @@ export async function summarize(transcript) {
 }
 
 // ---------------- mock ----------------
-async function mockAnswer({ userTurn, ctx, onText, onEvent, dry = false }) {
+async function mockAnswer({ userTurn, ctx, onText, onEvent, onTool, dry = false }) {
   const msg = (userTurn.match(/<message>([\s\S]*?)<\/message>/) || [, userTurn])[1].trim();
   const lang = (userTurn.match(/<lang>(\w+)<\/lang>/) || [, 'en'])[1];
   const docs = [...userTurn.matchAll(/<doc url="([^"]+)" title="([^"]*)"[^>]*>\n([\s\S]*?)<\/doc>/g)].map((m) => ({ url: m[1], title: m[2], chunk: m[3] }));
@@ -239,13 +243,13 @@ async function mockAnswer({ userTurn, ctx, onText, onEvent, dry = false }) {
   if (approved) text = '[MOCK · approved answer] ' + approved[1].trim();
   else if (dry) text = docs.length ? `[MOCK] From our website: ${docs[0].chunk.replace(/\s+/g, ' ').slice(0, 240)}… ${docs[0].url}` : '[MOCK] No matching material.';
   else if (/demo|consultant|talk to|human|agent|kausapin/i.test(msg)) {
-    const out = await runTool('handoff_to_human', { reason: 'mock: visitor asked for a person/demo' }, ctx); toolCalls.push({ name: 'handoff_to_human', output: out.result }); onEvent?.(out.event);
+    const out = await runTool('handoff_to_human', { reason: 'mock: visitor asked for a person/demo' }, ctx); toolCalls.push({ name: 'handoff_to_human', output: out.result }); await onTool?.(toolCalls.at(-1)); onEvent?.(out.event);
     text = lang === 'fil' ? 'Sige — ikokonekta kita sa sales consultant namin. Kokontakin ka nila sa loob ng 24 oras (Lun–Biy). Pwede ka ring tumawag sa +63 917-630-4848.' : "Sure — I'll connect you with one of our sales consultants. They'll reach you within 24 hours (Mon–Fri) at the contact you gave, or you can call +63 917-630-4848.";
   } else if (docs.length) {
     const d = docs[0];
     const first = d.chunk.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/).slice(0, 2).join(' ');
     const out = await runTool('save_lead', { need: msg.slice(0, 200), product_interest: [docs[0].title.match(/IQ \w+|SAP Business One/)?.[0] || 'Unknown'], company: null, industry: null, team_size: null, current_system: null }, ctx);
-    toolCalls.push({ name: 'save_lead', output: out.result }); onEvent?.(out.event);
+    toolCalls.push({ name: 'save_lead', output: out.result }); await onTool?.(toolCalls.at(-1)); onEvent?.(out.event);
     text = `${lang === 'fil' ? '[MOCK] Base sa aming website:' : '[MOCK] From our website:'} ${first}\n\n${lang === 'fil' ? 'Higit pa dito' : 'More here'}: ${d.url}\n\n${lang === 'fil' ? 'Ano ang ginagawa ng negosyo mo, para mairekomenda ko ang tamang fit?' : 'What does your business do, so I can point you to the right fit?'}`;
   } else {
     text = lang === 'fil' ? '[MOCK] Wala akong sapat na impormasyon diyan. Ikokonekta kita sa consultant: sales@dynamiqes.com / +63 917-630-4848.' : "[MOCK] I don't have good material on that. Let me connect you with a consultant: sales@dynamiqes.com / +63 917-630-4848.";

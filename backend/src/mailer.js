@@ -10,7 +10,7 @@ export async function sendHandoff(conversationId, reason) {
   const c = (await q(`select c.id, c.lang, v.name, v.contact, v.contact_type, v.first_page_url, l.need, l.product_interest, l.company, l.industry, l.team_size, l.current_system, l.demo_requested
                       from conversations c join visitors v on v.id=c.visitor_id left join leads l on l.conversation_id=c.id where c.id=$1`, [conversationId])).rows[0];
   if (!c) return;
-  const msgs = (await q(`select role, content, created_at from messages where conversation_id=$1 and role in ('user','assistant') order by id`, [conversationId])).rows;
+  const msgs = (await q(`select role, content, created_at from messages where conversation_id=$1 and role in ('user','assistant') order by seq, id`, [conversationId])).rows;
   const transcript = msgs.map((m) => `[${m.created_at.toISOString().slice(11, 16)}] ${m.role === 'user' ? c.name : 'DES'}: ${m.content}`).join('\n');
   const subject = `[DES] ${c.demo_requested ? 'Demo request' : 'Handoff'} — ${c.name}${c.company ? ' · ' + c.company : ''}${c.product_interest?.length ? ' · ' + c.product_interest.join(', ') : ''}`;
   const text = `Visitor: ${c.name}

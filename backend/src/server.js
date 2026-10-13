@@ -13,6 +13,12 @@ import fs from 'node:fs';
 const app = express();
 app.set('trust proxy', 1);
 app.use(cors({ origin: (o, cb) => cb(null, !o || !anySitesConfigured() || isAllowedOrigin(o)), credentials: false }));
+// the widget's last log on page close comes via navigator.sendBeacon: text/plain body (no CORS pre-check) with the token inside
+app.use('/api/log', express.text({ type: 'text/plain', limit: '64kb' }), (req, _res, next) => {
+  if (typeof req.body === 'string') { try { req.body = JSON.parse(req.body); } catch { req.body = {}; } }
+  if (!req.headers.authorization && typeof req.body?.token === 'string') req.headers.authorization = 'Bearer ' + req.body.token;
+  next();
+});
 app.use(express.json({ limit: '32kb' }));
 
 // ---- access gates ----

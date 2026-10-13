@@ -303,7 +303,7 @@
   // ---------------- conversations ----------------
   async function pageConversations() {
     const SIZE = 25;
-    const filters = { q: '', status: '', product: '', page: 1 };
+    const filters = { q: '', status: '', product: '', page: 1, all: false };
     const tbody = h('tbody'), pagerBox = h('div');
     const search = h('input', { class: 'input', type: 'search', placeholder: 'Search name or message…', 'aria-label': 'Search conversations' });
     const status = h('select', { class: 'input', 'aria-label': 'Status' }, h('option', { value: '', text: 'All statuses' }), h('option', { value: 'open', text: 'Open' }), h('option', { value: 'handed_off', text: 'Handed to sales' }), h('option', { value: 'closed', text: 'Closed' }), h('option', { value: 'ended', text: 'Ended by DES' }));
@@ -311,7 +311,7 @@
     const load = async (page = 1, scroll = false) => {
       filters.page = page;
       tbody.replaceChildren(h('tr', null, h('td', { colspan: 7, class: 'loading', text: 'Loading…' })));
-      const qs = new URLSearchParams({ limit: SIZE, offset: (page - 1) * SIZE }); if (filters.q) qs.set('q', filters.q); if (filters.status) qs.set('status', filters.status); if (filters.product) qs.set('product', filters.product);
+      const qs = new URLSearchParams({ limit: SIZE, offset: (page - 1) * SIZE }); if (filters.q) qs.set('q', filters.q); if (filters.status) qs.set('status', filters.status); if (filters.product) qs.set('product', filters.product); if (filters.all) qs.set('all', '1');
       let rows, total; try { const r = await api('/admin/conversations?' + qs, { raw: true }); total = Number(r.headers.get('x-total-count')) || 0; rows = await r.json(); } catch (e) { return fail(e); }
       tbody.replaceChildren();
       if (!rows.length) tbody.append(h('tr', null, h('td', { colspan: 7 }, empty('No conversations found', 'Try another filter.'))));
@@ -331,14 +331,50 @@
     search.addEventListener('input', debounce(() => { filters.q = search.value.trim(); load(1); }));
     status.addEventListener('change', () => { filters.status = status.value; load(1); });
     product.addEventListener('change', () => { filters.product = product.value; load(1); });
+    const allBox = h('input', { type: 'checkbox', on: { change: () => { filters.all = allBox.checked; load(1); } } });
+    const allLbl = h('label', { class: 'check', title: 'Chats where the visitor opened DES but never sent a message' }, allBox, ' Include empty chats');
     main.replaceChildren(
       top('Conversations', 'Every chat with DES. Open one to read it and turn a reply into an approved answer.'),
       h('section', { class: 'card' },
-        h('div', { class: 'card__head' }, h('div', { class: 'filters' }, search, status, product)),
+        h('div', { class: 'card__head' }, h('div', { class: 'filters' }, search, status, product, allLbl)),
         h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, ['Started', 'Visitor', 'First question', 'Products', 'Turns', 'Signals', 'Status'].map((t, i) => h('th', { text: t, class: i === 4 ? 'num' : null })))), tbody)),
         pagerBox),
     );
     load();
+  }
+
+  /** Messages in the order the visitor saw them. Grey bubbles: scripted widget messages (sign-up, survey, notices). */
+  function renderThread(messages, { goldenById = {}, thumbs = {}, reasons = {}, canSave = false }) {
+    let lastUser = null;
+    const thread = h('div', { class: 'thread' });
+    for (const m of messages) {
+      const script = m.kind === 'script';
+      if (m.role === 'user') {
+        if (!script) lastUser = m;
+        thread.append(h('div', { class: 'msg msg--user' + (script ? ' msg--script' : '') }, h('div', { class: 'msg__b', text: m.content }),
+          h('div', { class: 'msg__meta' }, m.product ? badge(m.product) : null, script ? badge('sign-up / choice') : null, when(m.created_at))));
+      } else if (m.role === 'assistant') {
+        const q = lastUser;
+        const used = (m.golden_ids || []).map((gid) => goldenById[String(gid)]).filter(Boolean);
+        thread.append(h('div', { class: 'msg msg--assistant' + (script ? ' msg--script' : '') },
+          h('div', { class: 'msg__b', html: fmt(m.content || (m.incomplete ? '(nothing shown yet)' : '')) }),
+          m.original_content ? h('details', { class: 'msg__orig' }, h('summary', { text: m.blocked_reason ? 'Original reply (replaced by a guardrail)' : 'Original reply (edited by a guardrail)' }), h('div', { html: fmt(m.original_content) })) : null,
+          h('div', { class: 'msg__meta' }, when(m.created_at),
+            script ? badge('widget message') : null,
+            m.incomplete ? badge(m.delivered === false ? 'Cut short: visitor left' : 'Cut short: error', 'badge--bad') : null,
+            !m.incomplete && m.delivered === false ? badge('Not delivered: visitor left', 'badge--bad') : null,
+            used.map((g) => badge('Approved: ' + g.question.slice(0, 40) + (g.question.length > 40 ? '…' : ''), 'badge--good')),
+            m.blocked_reason && !['visitor_left', 'error'].includes(m.blocked_reason) ? badge(blockLabel(m.blocked_reason), 'badge--bad') : null,
+            thumbs[m.id] === 1 ? badge('👍 liked', 'badge--good') : thumbs[m.id] === -1 ? badge('👎 ' + (reasons[m.id] || 'disliked'), 'badge--bad') : null,
+            canSave && q && !script && !m.incomplete ? h('button', { class: 'link-btn', type: 'button', text: 'Save as approved answer', on: { click: () => openGolden({ question: q.content, ideal_answer: m.content, product: m.product || q.product || GENERAL, message_id: Number(m.id) }) } }) : null)));
+      } else if (m.role === 'tool') {
+        const label = { save_lead: '⭐ Saved lead details', book_demo: '📅 Booked a demo request', handoff_to_human: '🤝 Handed to a consultant', search_kb: '🔎 Searched the website', get_open_jobs: '💼 Looked up open jobs' }[m.tool_name] || m.tool_name;
+        thread.append(h('div', { class: 'msg msg--tool', text: label }));
+      } else if (m.role === 'system') {
+        thread.append(h('div', { class: 'msg msg--event', text: m.content }));
+      }
+    }
+    return thread;
   }
 
   async function openConversation(id) {
@@ -352,26 +388,20 @@
     head.replaceChildren(
       h('div', null, h('h2', { text: c.name }), h('div', { class: 'meta-line', style: { marginTop: '4px' } }, statusBadge(c.status), when(c.started_at), c.lang === 'fil' ? badge('Filipino') : null)),
       h('button', { class: 'x', type: 'button', 'aria-label': 'Close', text: '✕', on: { click: closeLayer } }));
-    let lastUser = null;
-    const thread = h('div', { class: 'thread' });
-    for (const m of c.messages) {
-      if (m.role === 'user') {
-        lastUser = m;
-        thread.append(h('div', { class: 'msg msg--user' }, h('div', { class: 'msg__b', text: m.content }), h('div', { class: 'msg__meta' }, m.product ? badge(m.product) : null, when(m.created_at))));
-      } else if (m.role === 'assistant') {
-        const q = lastUser;
-        const used = (m.golden_ids || []).map((gid) => goldenById[String(gid)]).filter(Boolean);
-        thread.append(h('div', { class: 'msg msg--assistant' },
-          h('div', { class: 'msg__b', html: fmt(m.content) }),
-          h('div', { class: 'msg__meta' }, when(m.created_at),
-            used.map((g) => badge('Approved: ' + g.question.slice(0, 40) + (g.question.length > 40 ? '…' : ''), 'badge--good')),
-            m.blocked_reason ? badge(blockLabel(m.blocked_reason), 'badge--bad') : null,
-            thumbs[m.id] === 1 ? badge('👍 liked', 'badge--good') : thumbs[m.id] === -1 ? badge('👎 ' + (reasons[m.id] || 'disliked'), 'badge--bad') : null,
-            q ? h('button', { class: 'link-btn', type: 'button', text: 'Save as approved answer', on: { click: () => openGolden({ question: q.content, ideal_answer: m.content, product: m.product || q.product || GENERAL, message_id: Number(m.id) }) } }) : null)));
-      } else if (m.role === 'tool') {
-        const label = { save_lead: '⭐ Saved lead details', book_demo: '📅 Booked a demo request', handoff_to_human: '🤝 Handed to a consultant', search_kb: '🔎 Searched the website', get_open_jobs: '💼 Looked up open jobs' }[m.tool_name] || m.tool_name;
-        thread.append(h('div', { class: 'msg msg--tool', text: label }));
-      }
+    const thread = renderThread(c.messages, { goldenById, thumbs, reasons, canSave: true });
+    const tabs = h('div', { class: 'ptabs', role: 'tablist' });
+    const panel = h('div', { role: 'tabpanel' }, thread);
+    if (c.other_conversations > 0) {
+      const tab = (key, label, show) => h('button', { type: 'button', role: 'tab', 'data-tab': key, class: key === 'this' ? 'is-on' : null, text: label, on: { click: async (e) => {
+        tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('is-on', b === e.currentTarget)); await show(); } } });
+      tabs.append(tab('this', 'This conversation', () => panel.replaceChildren(thread)),
+        tab('history', `Visitor history (${c.other_conversations + 1} chats)`, async () => {
+          panel.replaceChildren(h('div', { class: 'loading', text: 'Loading…' }));
+          let hst; try { hst = await api(`/admin/conversations/${id}/history`); } catch (e) { return fail(e); }
+          panel.replaceChildren(...hst.conversations.map((cv) => h('section', { class: 'history-conv' + (cv.id === id ? ' is-current' : '') },
+            h('div', { class: 'day-sep' }, h('span', { text: when(cv.started_at) }), statusBadge(cv.status), cv.id === id ? badge('This conversation', 'badge--brand') : null),
+            cv.messages.length ? renderThread(cv.messages, {}) : h('p', { class: 'muted', text: 'Opened the chat, sent nothing.' }))));
+        }));
     }
     if (!c.messages.length) thread.append(empty('No messages', 'The visitor opened the chat but did not send anything.'));
     const lead = c.lead;
@@ -385,7 +415,8 @@
           h('div', { class: 'muted', text: [lead.company, lead.industry, lead.team_size && lead.team_size + ' people', lead.current_system].filter(Boolean).join(' · ') }))] : null,
         c.handoffs.length ? [h('dt', { text: 'Handoffs' }), h('dd', { text: c.handoffs.map((x) => x.reason).join('; ') })] : null,
       ))),
-      thread,
+      tabs.children.length ? tabs : null,
+      panel,
       h('div', { style: { marginTop: '28px', paddingTop: '14px', borderTop: '1px solid var(--line)' } },
         h('button', { class: 'btn btn--danger btn--sm', type: 'button', text: 'Delete this visitor’s data', on: { click: async () => {
           if (!confirm(`Permanently delete ${c.name}'s details, chats and lead? Use this for Data Privacy Act erasure requests. This cannot be undone.`)) return;

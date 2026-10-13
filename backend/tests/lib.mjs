@@ -33,7 +33,7 @@ export async function guard(label, fn, ms = 360000) {
 export const ADMIN = 'test-admin-token-' + Math.random().toString(36).slice(2);
 export function testEnv(port, dbDir, extra = {}) {
   return {
-    ...process.env, PORT: String(port), DATABASE_URL: 'pglite:' + dbDir, ADMIN_TOKEN: ADMIN,
+    ...process.env, PORT: String(port), DATABASE_URL: 'pglite:' + dbDir, ADMIN_TOKEN: ADMIN, DES_TEST_HOOKS: '1',
     TURNSTILE_SECRET: '', SMTP_HOST: '', PUBLIC_URL: '', WEBSITE_URL: '',
     ALLOWED_ORIGINS: [process.env.ALLOWED_ORIGINS, 'http://localhost:' + port].filter(Boolean).join(','), // the test backend's own pages count as an approved site
     RATE_SESSIONS_PER_IP_DAY: '1000', RATE_SESSIONS_PER_CONTACT_DAY: '3', RATE_MSG_PER_10MIN: '30', ...extra,
@@ -80,8 +80,8 @@ export function api(base) {
     const text = await r.text(); let json = null; try { json = JSON.parse(text); } catch { }
     return { status: r.status, json, text, headers: r.headers };
   }
-  async function chat(token, message, id) {
-    const r = await fetch(base + '/api/chat', { method: 'POST', headers: headers(id, token), body: JSON.stringify({ message }) });
+  async function chat(token, message, id, { held, prefix, hook } = {}) {
+    const r = await fetch(base + '/api/chat', { method: 'POST', headers: { ...headers(id, token), ...(hook || {}) }, body: JSON.stringify({ message, ...(held ? { held: true } : {}), ...(prefix ? { prefix } : {}) }) });
     const text = await r.text();
     const events = text.split('\n\n').map((b) => ({ ev: b.match(/^event: (.*)$/m)?.[1], data: b.match(/^data: (.*)$/m)?.[1] })).filter((x) => x.ev).map((x) => ({ ev: x.ev, data: JSON.parse(x.data) }));
     return { status: r.status, events, done: events.find((e) => e.ev === 'done')?.data || null, error: events.find((e) => e.ev === 'error')?.data || null, types: events.filter((e) => e.ev === 'event').map((e) => e.data.type) };
@@ -92,6 +92,13 @@ export function api(base) {
 }
 
 // ---------------- jsdom (widget / dashboard) ----------------
+/** jsdom's AbortSignal is not Node's: Node's fetch rejects it, so mirror it onto a Node one. */
+function nodeSignal(s) {
+  if (!s) return undefined;
+  const ac = new AbortController();
+  if (s.aborted) ac.abort(); else s.addEventListener('abort', () => ac.abort());
+  return ac.signal;
+}
 export async function loadPage(base, pagePath, { id, cfg = '', storage = {}, beforeScripts } = {}) {
   let html = await (await fetch(base + pagePath.split('?')[0])).text();
   html = html.replace('window.DES_CFG = { idleSurveyMs: 90 * 1000 };', `window.DES_CFG = { idleSurveyMs: 90 * 1000, typingMs: [0, 0], autoOpenMs: 0${cfg ? ', ' + cfg : ''} };`);
@@ -101,7 +108,7 @@ export async function loadPage(base, pagePath, { id, cfg = '', storage = {}, bef
   const dom = new JSDOM(html, {
     url: base + pagePath, runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true, virtualConsole: vc,
     beforeParse(w) {
-      w.fetch = (u, o = {}) => fetch(new URL(u, base), { ...o, headers: { ...(o.headers || {}), ...(id ? { 'cf-connecting-ip': id.ip, origin: base } : {}) } });
+      w.fetch = (u, o = {}) => fetch(new URL(u, base), { ...o, signal: nodeSignal(o.signal), headers: { ...(o.headers || {}), ...(id ? { 'cf-connecting-ip': id.ip, origin: base } : {}) } });
       w.TextDecoder = TextDecoder; w.TextEncoder = TextEncoder;
       w.ResizeObserver = class { observe() { } disconnect() { } };
       w.scrollTo = () => { }; w.Element.prototype.scrollTo = () => { }; w.HTMLElement.prototype.scrollIntoView = () => { };

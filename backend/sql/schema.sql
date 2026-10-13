@@ -205,3 +205,22 @@ create table if not exists allowed_sites (        -- websites added in the dashb
   note text,
   added_at timestamptz default now()
 );
+
+-- ---- complete conversation capture (2026-10-13) ----
+-- every message the visitor sees or sends is stored, in order: AI replies (incl. partial ones), scripted widget bubbles, notices
+alter table messages add column if not exists seq int;                          -- order within the conversation (assigned on insert)
+alter table messages add column if not exists kind text default 'chat';         -- chat (AI history) | script (widget bubble / sign-up) | event (notice)
+alter table messages add column if not exists incomplete boolean default false; -- reply cut short (error, timeout, visitor left)
+alter table messages add column if not exists delivered boolean default true;   -- false when the visitor had left before the reply finished
+alter table messages add column if not exists original_content text;            -- AI text before a guardrail replaced or edited it
+alter table messages add column if not exists source text default 'server';     -- server | widget (logged by the browser)
+alter table messages add column if not exists held boolean default false;       -- first question held during sign-up, answered after it
+alter table conversations add column if not exists last_seq int default 0;
+alter table conversations add column if not exists last_activity_at timestamptz;
+alter table visitors add column if not exists person_key text;                  -- same person across sign-ups (phone / contact HMAC)
+create index if not exists visitors_person_key_idx on visitors(person_key);
+create index if not exists messages_conv_seq_idx on messages(conversation_id, seq);
+update messages m set seq = x.rn from (select id, row_number() over (partition by conversation_id order by id) rn from messages) x where m.id = x.id and m.seq is null;
+update conversations c set last_seq = x.mx from (select conversation_id, max(seq) mx from messages group by conversation_id) x where x.conversation_id = c.id and coalesce(c.last_seq, 0) < x.mx;
+update conversations c set last_activity_at = coalesce((select max(created_at) from messages m where m.conversation_id = c.id), c.started_at) where c.last_activity_at is null;
+update visitors set person_key = contact_hash where person_key is null and contact_hash is not null;

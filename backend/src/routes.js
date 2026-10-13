@@ -10,6 +10,7 @@ import { maskPII, injectionScore, classify, detectLang, filterOutput, CANNED, MA
 import { handoff } from './tools.js';
 import { validateName, validateContact } from './contact.js';
 import { ingestUrl, sweepSitemap } from './ingest.js';
+import { addMessage, serialize, maskWidgetText } from './log.js';
 
 export const r = Router();
 // real visitor address: Cloudflare's header first (the tunnel / proxy sets it), then X-Forwarded-For, then the socket
@@ -56,6 +57,13 @@ function admin(req, res, next) {
   if (cfg.adminToken && tok === cfg.adminToken) return next();
   res.status(401).json({ error: 'admin_only' });
 }
+// DynamIQ's own numbers / emails (company facts): refused as a visitor contact, left unmasked in logged bubbles
+const normContact = (v) => String(v || '').toLowerCase().replace(/[^0-9a-z@.]/g, '').replace(/^0/, '63').replace(/^63/, '');
+async function ownContacts() {
+  const own = await facts();
+  return ['sales_mobile', 'landline', 'hr_mobile', 'sales_email', 'hr_email', 'dpo_email'].map((k) => normContact(own[k])).filter(Boolean);
+}
+const isOwnContact = (value, own) => { const mine = normContact(value); return own.some((x) => x === mine || (x.length > 6 && mine.endsWith(x))); };
 async function verifyTurnstile(token, ip) {
   if (!cfg.turnstileSecret) return true;
   const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret: cfg.turnstileSecret, response: token, remoteip: ip }) });
@@ -73,7 +81,7 @@ r.get('/ban', async (req, res) => {
 });
 
 r.post('/session', async (req, res) => {
-  const { name, contact, consent, marketing_opt_in, lang, page_url, turnstile } = req.body || {};
+  const { name, contact, consent, marketing_opt_in, lang, page_url, turnstile, transcript } = req.body || {};
   const ip = ipHash(req);
   if (await isBlocked('ip:' + ip)) return res.status(429).json({ error: 'blocked' });
   if (!(await verifyTurnstile(turnstile, req.ip))) return res.status(400).json({ error: 'turnstile_failed' });
@@ -83,10 +91,7 @@ r.post('/session', async (req, res) => {
   if (!consent || consent.version !== cfg.consentVersion) return res.status(400).json({ error: 'consent_required', consent_version: cfg.consentVersion });
   const ct = await validateContact(contact);
   if (!ct.ok) return res.status(400).json({ error: ct.code });
-  const own = await facts();
-  const ownContacts = ['sales_mobile', 'landline', 'hr_mobile', 'sales_email', 'hr_email', 'dpo_email'].map((k) => String(own[k] || '').toLowerCase().replace(/[^0-9a-z@.]/g, '').replace(/^0/, '63').replace(/^63/, '')).filter(Boolean);
-  const mine = ct.value.toLowerCase().replace(/[^0-9a-z@.]/g, '').replace(/^63/, '');
-  if (ownContacts.some((x) => x === mine || (x.length > 6 && mine.endsWith(x)))) return res.status(400).json({ error: 'own_contact' });
+  if (isOwnContact(ct.value, await ownContacts())) return res.status(400).json({ error: 'own_contact' });
   const c = ct.value;
   // the widget sends the cleaned number plus the platform it saw ("viber: 0917…"); keep that label
   const ctype = ct.type === 'mobile' && ['viber', 'whatsapp', 'wechat', 'telegram', 'signal', 'line'].includes(req.body?.contact_type) ? req.body.contact_type : ct.type;
@@ -96,35 +101,93 @@ r.post('/session', async (req, res) => {
   if ((await count('ip:' + ip, 'session', 86400)) >= cfg.rate.sessionsPerIpDay) return res.status(429).json({ error: 'too_many_sessions' });
   if ((await count('contact:' + hmac(c), 'session', 86400)) >= cfg.rate.sessionsPerContactDay) return res.status(429).json({ error: 'too_many_sessions' });
 
-  const v = await q(`insert into visitors(name, contact, contact_hash, contact_type, consent_at, consent_version, consent_method, marketing_opt_in, lang, first_page_url, ip_hash)
-                     values($1,$2,$3,$4,now(),$5,$6,$7,$8,$9,$10) returning id`,
+  const v = await q(`insert into visitors(name, contact, contact_hash, contact_type, consent_at, consent_version, consent_method, marketing_opt_in, lang, first_page_url, ip_hash, person_key)
+                     values($1,$2,$3,$4,now(),$5,$6,$7,$8,$9,$10,$3) returning id`,
     [cleanName, encrypt(c), hmac(c), ctype, consent.version, consent.method || 'chip', !!marketing_opt_in, lang === 'fil' ? 'fil' : 'en', (page_url || '').slice(0, 500), ip]);
   const conv = await q('insert into conversations(visitor_id, lang) values($1,$2) returning id', [v.rows[0].id, lang === 'fil' ? 'fil' : 'en']);
   await hit('ip:' + ip, 'session'); await hit('contact:' + hmac(c), 'session');
+  // what the visitor saw and typed before the session existed (greeting, sign-up), so the dashboard has the whole chat
+  if (Array.isArray(transcript)) {
+    const keep = await ownContacts();
+    for (const it of transcript.slice(0, 40)) {
+      const isHeld = it?.held === true && it?.role === 'user';
+      const content = isHeld ? maskPII(String(it.content || '')).text.slice(0, 4000) : maskWidgetText(String(it?.content || '').slice(0, 1000), keep);
+      if (content.trim()) await addMessage(conv.rows[0].id, { role: it?.role === 'user' ? 'user' : 'assistant', content, kind: isHeld ? 'chat' : 'script', source: 'widget', held: isHeld });
+    }
+  }
 
   const first = cleanName.split(/\s+/)[0];
   const token = jwt.sign({ vid: v.rows[0].id, cid: conv.rows[0].id, first }, cfg.jwtSecret, { expiresIn: '2h' });
   res.json({ session_id: conv.rows[0].id, token, first_name: first, name: cleanName, contact: c, contact_type: ctype });
 });
 
-// returning visitor: new conversation, same visitor
+// returning visitor: continue the recent conversation (same visit), or start a new one for the same visitor
 r.post('/session/resume', auth, async (req, res) => {
   const resumeBan = await banUntil(banKeys(req, { vid: req.session.vid }));
   if (resumeBan) return res.status(403).json({ error: 'chat_ended', until: resumeBan });
-  const conv = await q('insert into conversations(visitor_id, lang) values($1,$2) returning id', [req.session.vid, req.body?.lang === 'fil' ? 'fil' : 'en']);
-  const token = jwt.sign({ vid: req.session.vid, cid: conv.rows[0].id, first: req.session.first }, cfg.jwtSecret, { expiresIn: '2h' });
-  res.json({ session_id: conv.rows[0].id, token, first_name: req.session.first });
+  const last = (await q(`select id from conversations where visitor_id=$1 and status in ('open','handed_off')
+                         and coalesce(last_activity_at, started_at) > now() - make_interval(mins => $2) order by started_at desc limit 1`, [req.session.vid, cfg.resumeWindowMin])).rows[0];
+  const cid = last?.id || (await q('insert into conversations(visitor_id, lang) values($1,$2) returning id', [req.session.vid, req.body?.lang === 'fil' ? 'fil' : 'en'])).rows[0].id;
+  const token = jwt.sign({ vid: req.session.vid, cid, first: req.session.first }, cfg.jwtSecret, { expiresIn: '2h' });
+  res.json({ session_id: cid, token, first_name: req.session.first, continued: !!last });
+});
+
+// ---------- widget log: bubbles the browser showed that the server did not produce ----------
+// Sign-up prompts, survey, handoff confirmation, error and timeout notices. Stored as kind='script' so they are
+// visible in the dashboard but never sent to the AI. Contact details and card / ID numbers are masked.
+r.post('/log', auth, async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : null;
+  if (!items || !items.length || items.length > 20) return res.status(400).json({ error: 'bad_items' });
+  const cid = req.session.cid;
+  if ((await count('session:' + cid, 'log', 600)) >= 120) return res.status(429).json({ error: 'rate_limited' });
+  await hit('session:' + cid, 'log');
+  const keep = await ownContacts();
+  await serialize(cid, async () => {
+    for (const it of items) {
+      const role = it?.role === 'user' ? 'user' : 'assistant';
+      const content = maskWidgetText(String(it?.content || '').slice(0, 1000), keep);
+      if (content.trim()) await addMessage(cid, { role, content, kind: 'script', source: 'widget' });
+    }
+  });
+  res.json({ ok: true });
 });
 
 // ---------- chat (SSE) ----------
 r.post('/chat', auth, async (req, res) => {
+  res.setHeader('content-type', 'text/event-stream'); res.setHeader('cache-control', 'no-cache'); res.flushHeaders();
+  // the visitor closed the page / the widget gave up waiting: stop the AI call and remember the reply was not delivered
+  const ac = new AbortController(); let gone = false;
+  res.on('close', () => { if (!res.writableEnded) { gone = true; ac.abort(); } });
+  await serialize(req.session.cid, () => chatTurn(req, res, ac, () => gone));
+});
+
+async function chatTurn(req, res, ac, isGone) {
   const { cid, vid, first } = req.session;
   const raw = String(req.body?.message || '').trim();
-  res.setHeader('content-type', 'text/event-stream'); res.setHeader('cache-control', 'no-cache'); res.flushHeaders();
-  const send = (ev, data) => res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`);
-  const finish = async (text, { blocked = null, lang = 'en', ended = false, until = null } = {}) => {
-    await q('insert into messages(conversation_id, role, content, blocked_reason) values($1,$2,$3,$4)', [cid, 'assistant', text, blocked]);
-    send('done', { text, blocked, lang, ended, until }); res.end();
+  const held = req.body?.held === true;
+  const prefix = held ? maskWidgetText(String(req.body?.prefix || '').slice(0, 80)) : ''; // "Thanks, Ana. " shown before the answer
+  const hooks = cfg.testHooks ? { append: req.get('x-des-test-append') || '', fail: req.get('x-des-test-fail') || '' } : {};
+  const send = (ev, data) => { if (!isGone()) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); };
+  let userRowId = null;
+  /** The visitor's message. The question held during sign-up was already stored with the sign-up transcript. */
+  const storeUser = async (text, product = null) => {
+    if (held) {
+      const h = (await q(`select id from messages where conversation_id=$1 and role='user' and held order by seq desc limit 1`, [cid])).rows[0];
+      if (h) { await q('update messages set held=false, product=$2 where id=$1', [h.id, product]); userRowId = Number(h.id); }
+    }
+    if (!userRowId) userRowId = (await addMessage(cid, { role: 'user', content: text, product })).id;
+    await q('update conversations set turns = turns + 1 where id=$1', [cid]);
+  };
+  /** Store a reply the visitor sees, then end the stream. */
+  const finish = async (text, { blocked = null, lang = 'en', ended = false, until = null, kind = 'chat' } = {}) => {
+    const m = await addMessage(cid, { role: 'assistant', content: prefix + text, blocked_reason: blocked, kind, delivered: !isGone() });
+    send('done', { text, blocked, lang, ended, until, message_id: m.id }); res.end();
+  };
+  /** A message refused without a server reply bubble (the widget shows and logs its own notice). */
+  const refuse = async (code, note) => {
+    if (raw) await storeUser(maskPII(raw).text.slice(0, 4000));
+    await addMessage(cid, { role: 'system', kind: 'event', content: note });
+    send('error', { code }); res.end();
   };
   /** Off-topic / abusive / injection message: redirect, warn on the second-to-last strike, end the chat on the last. */
   const strike = async (kind, lang) => {
@@ -144,6 +207,7 @@ r.post('/chat', auth, async (req, res) => {
     send('text', { delta: msg }); return finish(msg, { blocked: kind, lang });
   };
 
+  let streamed = '', saved = false;
   try {
     const conv = (await q('select lang, turns, status from conversations where id=$1', [cid])).rows[0];
     if (!conv) { send('error', { code: 'no_conversation' }); return res.end(); }
@@ -152,20 +216,22 @@ r.post('/chat', auth, async (req, res) => {
     const bannedUntil = await banUntil(banKeys(req, { vid }));
     if (conv.status === 'ended' || bannedUntil) {
       const until = bannedUntil || (await banUntil(banKeys(req, { vid })));
-      send('event', { type: 'ended', until }); send('done', { text: C.ended, blocked: 'ended', lang, ended: true, until }); return res.end();
+      if (raw) await storeUser(maskPII(raw).text.slice(0, 4000));
+      send('event', { type: 'ended', until });
+      return finish(C.ended, { blocked: 'ended', lang, ended: true, until, kind: 'event' });
     }
 
     // input guardrails
     if (!raw) { send('error', { code: 'empty' }); return res.end(); }
-    if (raw.length > MAX_INPUT_CHARS) { send('text', { delta: C.tooLong }); return finish(C.tooLong, { blocked: 'too_long', lang }); }
-    if (await isBlocked('session:' + cid)) { send('error', { code: 'blocked' }); return res.end(); }
-    if ((await count('session:' + cid, 'msg', 600)) >= cfg.rate.msgPer10Min || (await count('session:' + cid, 'msg', 86400)) >= cfg.rate.msgPerDay) { send('error', { code: 'rate_limited' }); return res.end(); }
+    if (raw.length > MAX_INPUT_CHARS) { await storeUser(maskPII(raw).text.slice(0, 4000)); send('text', { delta: C.tooLong }); return finish(C.tooLong, { blocked: 'too_long', lang }); }
+    if (await isBlocked('session:' + cid)) return refuse('blocked', 'Not answered: this chat is blocked (repeated prompt-injection attempts).');
+    if ((await count('session:' + cid, 'msg', 600)) >= cfg.rate.msgPer10Min || (await count('session:' + cid, 'msg', 86400)) >= cfg.rate.msgPerDay) return refuse('rate_limited', 'Not answered: too many messages (rate limit).');
     await hit('session:' + cid, 'msg');
 
     const { text: masked, hits: piiHits } = maskPII(raw);
     const product = detectProduct(masked);
-    await q('insert into messages(conversation_id, role, content, product) values($1,$2,$3,$4)', [cid, 'user', masked, product]);
-    await q('update conversations set turns = turns + 1, lang = $2 where id=$1', [cid, lang]);
+    await storeUser(masked, product);
+    await q('update conversations set lang = $2 where id=$1', [cid, lang]);
 
     if (conv.turns + 1 > cfg.rate.maxTurns) { await handoff({ conversationId: cid, visitorId: vid }, 'turn cap'); send('text', { delta: C.trouble }); return finish(C.trouble, { blocked: 'turn_cap', lang }); }
     if (injectionScore(masked) >= 1) {
@@ -188,14 +254,22 @@ r.post('/chat', auth, async (req, res) => {
     if (approved.length) await q('update golden_answers set use_count = use_count + 1, last_used_at = now() where id = any($1::bigint[])', [approved.map((a) => a.id)]);
     const userTurn = `${context}\n<message>\n${masked}${piiHits ? '\n(Note: the visitor pasted sensitive numbers which were redacted; remind them gently not to share those here.)' : ''}\n</message>`;
 
-    // history (last 10 turns, text only)
-    const hist = (await q(`select role, content from messages where conversation_id=$1 and role in ('user','assistant') and blocked_reason is null order by id desc limit 21`, [cid])).rows.reverse();
-    hist.pop(); // the message we just inserted is sent as userTurn
+    // history (last 10 turns): the AI conversation only, no scripted widget bubbles, notices or cut-off replies
+    const hist = (await q(`select role, content from messages where conversation_id=$1 and role in ('user','assistant') and kind='chat' and blocked_reason is null
+                           and not coalesce(incomplete, false) and id <> $2 order by seq desc, id desc limit 20`, [cid, userRowId])).rows.reverse();
     const history = hist.map((m) => ({ role: m.role, content: m.content }));
 
     const ctx = { conversationId: cid, visitorId: vid };
-    let streamed = '';
-    const out = await answer({ system, history, userTurn, ctx, onText: (d) => { streamed += d; send('text', { delta: d }); }, onEvent: (ev) => send('event', ev) });
+    const onText = (d) => {
+      streamed += d; send('text', { delta: d });
+      if (hooks.fail === 'midstream' && streamed.length > 20) throw new Error('test hook: failure mid-reply');
+    };
+    const onTool = (t) => addMessage(cid, { role: 'tool', content: t.output?.slice(0, 2000) || '', tool_name: t.name, tool_input: t.input || null, tool_output: { result: t.output?.slice(0, 2000) } });
+    let out;
+    try { out = await answer({ system, history, userTurn, ctx, onText, onEvent: (ev) => send('event', ev), onTool, signal: ac.signal }); }
+    finally { if (!out) ac.abort(); } // stop reading the gateway stream after an error
+    if (isGone()) throw Object.assign(new Error('visitor left'), { code: 'visitor_left' });
+    if (hooks.append) { out.text += hooks.append; streamed += hooks.append; send('text', { delta: hooks.append }); }
 
     // output guardrails
     const visitorContact = decrypt((await q('select contact from visitors where id=$1', [vid])).rows[0]?.contact) || '';
@@ -205,21 +279,28 @@ r.post('/chat', auth, async (req, res) => {
     else if (reasons.length) { text = C.trouble; blocked = reasons.join(','); }
     if (blocked || text !== streamed) send('replace', { text });
 
-    for (const t of out.toolCalls) await q('insert into messages(conversation_id, role, content, tool_name, tool_input, tool_output) values($1,$2,$3,$4,$5,$6)', [cid, 'tool', t.output?.slice(0, 2000) || '', t.name, t.input || null, { result: t.output?.slice(0, 2000) }]);
-    const saved = await q('insert into messages(conversation_id, role, content, tokens_in, tokens_out, cache_read, blocked_reason, product, golden_ids) values($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id', [cid, 'assistant', text, out.usage.in, out.usage.out, out.usage.cache, blocked, product, approved.length ? approved.map((a) => a.id) : null]);
-    send('done', { text, blocked, lang, message_id: Number(saved.rows[0].id), sources: chunks.slice(0, 3).map((c) => ({ title: c.title, url: c.url })) });
+    const m = await addMessage(cid, { role: 'assistant', content: prefix + text, original_content: text !== out.text ? out.text : null, tokens_in: out.usage.in, tokens_out: out.usage.out, cache_read: out.usage.cache,
+      blocked_reason: blocked, product, golden_ids: approved.length ? approved.map((a) => a.id) : null, delivered: !isGone() });
+    saved = true;
+    send('done', { text, blocked, lang, message_id: m.id, sources: chunks.slice(0, 3).map((c) => ({ title: c.title, url: c.url })) });
     res.end();
   } catch (e) {
+    // keep whatever part of the reply the visitor already saw (or would have seen), marked as cut short
+    if (!saved && userRowId && (streamed || isGone())) {
+      try { await addMessage(cid, { role: 'assistant', content: prefix + streamed, incomplete: true, delivered: !isGone(), blocked_reason: isGone() ? 'visitor_left' : 'error' }); saved = true; } catch (e2) { console.error('partial reply not saved', e2.message); }
+    }
+    if (isGone()) return; // nobody to answer, and not a fault worth a Sales email
     console.error('chat error', e);
     try { await handoff({ conversationId: cid, visitorId: vid }, 'system: ' + e.message); } catch { }
     if (e.code === 'gateway_credits') { // IQGateway wallet empty or daily cap reached: same polite text as our own budget cap
-      const lang = detectLang(String(req.body?.message || ''));
+      const lang = detectLang(raw);
       const msg = (CANNED[lang] || CANNED.en).budget;
+      await addMessage(cid, { role: 'assistant', content: msg, blocked_reason: 'budget', kind: 'event' }).catch(() => { });
       send('replace', { text: msg }); send('done', { text: msg, blocked: 'budget', lang, sources: [] }); return res.end();
     }
     send('error', { code: 'llm_error' }); res.end();
   }
-});
+}
 
 // ---------- feedback / handoff / end ----------
 r.post('/feedback', auth, async (req, res) => {
@@ -234,9 +315,9 @@ r.post('/handoff', auth, async (req, res) => {
   res.json({ ok: true, already: h.already });
 });
 r.post('/end', auth, async (req, res) => {
-  const msgs = (await q(`select role, content from messages where conversation_id=$1 and role in ('user','assistant') order by id`, [req.session.cid])).rows;
+  const msgs = (await q(`select role, content from messages where conversation_id=$1 and role in ('user','assistant') order by seq, id`, [req.session.cid])).rows;
   const summary = msgs.length ? await summarize(msgs.map((m) => `${m.role}: ${m.content}`).join('\n')).catch((e) => { console.error('summary failed', e.message); return null; }) : null;
-  await q(`update conversations set ended_at = now(), status = case when status='open' then 'closed' else status end, summary=$2 where id=$1`, [req.session.cid, summary]);
+  await q(`update conversations set ended_at = now(), status = case when status='open' then 'closed' else status end, summary=coalesce($2, summary) where id=$1`, [req.session.cid, summary]);
   res.json({ ok: true });
 });
 
@@ -260,7 +341,7 @@ r.get('/admin/leads', admin, async (req, res) => {
 r.get('/admin/conversations/:id', admin, async (req, res) => {
   const conv = (await q(`select c.*, v.name, v.contact, v.contact_type from conversations c join visitors v on v.id=c.visitor_id where c.id=$1`, [req.params.id])).rows[0];
   if (!conv) return res.status(404).end();
-  const messages = (await q('select id, role, content, tool_name, tool_input, blocked_reason, tokens_in, tokens_out, created_at from messages where conversation_id=$1 order by id', [req.params.id])).rows;
+  const messages = (await q('select id, role, content, tool_name, tool_input, blocked_reason, tokens_in, tokens_out, created_at from messages where conversation_id=$1 order by seq, id', [req.params.id])).rows;
   const feedback = (await q('select * from feedback where conversation_id=$1 order by id', [req.params.id])).rows;
   res.json({ ...conv, contact: decrypt(conv.contact), messages, feedback });
 });
