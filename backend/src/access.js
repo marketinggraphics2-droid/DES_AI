@@ -16,6 +16,16 @@ async function getKeys() {
   return keys;
 }
 
+/** Client IP for the admin allow-list. Cloudflare's CF-Connecting-IP is believed only when the request came from
+ *  cloudflared on this computer (or TRUST_CLOUDFLARE=true): someone on the network could otherwise send the header
+ *  with an allowed address. Everything else uses Express's req.ip (TRUST_PROXY decides which proxies count). */
+export function adminClientIp(req, { trustCloudflare = cfg.trustCloudflare } = {}) {
+  const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress);
+  const cf = req.headers?.['cf-connecting-ip'];
+  if (cf && (trustCloudflare || loopback)) return String(cf).split(',')[0].trim();
+  return String(req.ip || req.socket?.remoteAddress || '');
+}
+
 /** Email of the user Cloudflare Access let through, or null (not configured / no or invalid token). */
 export async function accessUser(req) {
   if (!cfg.access.teamDomain || !cfg.access.aud) return null;

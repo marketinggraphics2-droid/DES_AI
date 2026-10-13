@@ -11,6 +11,7 @@ import { handoff } from './tools.js';
 import { validateName, validatePhone, validateEmail } from './contact.js';
 import { ingestUrl, sweepSitemap } from './ingest.js';
 import { addMessage, serialize, maskWidgetText } from './log.js';
+import { audit } from './auth.js';
 
 export const r = Router();
 // real visitor address: Cloudflare's header first (the tunnel / proxy sets it), then X-Forwarded-For, then the socket
@@ -52,11 +53,6 @@ async function auth(req, res, next) {
     }
     req.session = s; next();
   } catch (e) { console.error('auth check failed', e.message); res.status(500).json({ error: 'server_error' }); }
-}
-function admin(req, res, next) {
-  const tok = (req.headers.authorization || '').replace(/^Bearer /, '');
-  if (cfg.adminToken && tok === cfg.adminToken) return next();
-  res.status(401).json({ error: 'admin_only' });
 }
 // DynamIQ's own numbers / emails (company facts): refused as a visitor contact, left unmasked in logged bubbles
 const normContact = (v) => String(v || '').toLowerCase().replace(/[^0-9a-z@.]/g, '').replace(/^0/, '63').replace(/^63/, '');
@@ -366,20 +362,20 @@ r.post('/ingest/webhook', async (req, res) => {
   ingestUrl(url, { action: action || 'update', source: 'webhook' }).catch((e) => console.error('webhook ingest', e));
 });
 
-// ---------- admin (temporary bearer token; replace with Google SSO) ----------
-r.get('/admin/leads', admin, async (req, res) => {
+// ---------- admin (older endpoints; sign-in and permissions are checked by adminAuth, server.js) ----------
+r.get('/admin/leads', async (req, res) => {
   const rows = (await q(`select l.*, v.name, v.phone, v.phone_type, v.email, v.email_type, v.marketing_opt_in, c.summary, c.status as conv_status, c.started_at
                          from leads l join visitors v on v.id=l.visitor_id left join conversations c on c.id=l.conversation_id order by l.updated_at desc limit 500`)).rows;
   res.json(rows.map((x) => ({ ...x, phone: decrypt(x.phone), email: decrypt(x.email) })));
 });
-r.get('/admin/conversations/:id', admin, async (req, res) => {
+r.get('/admin/conversations/:id', async (req, res) => {
   const conv = (await q(`select c.*, v.name, v.phone, v.phone_type, v.email, v.email_type from conversations c join visitors v on v.id=c.visitor_id where c.id=$1`, [req.params.id])).rows[0];
   if (!conv) return res.status(404).end();
   const messages = (await q('select id, role, content, tool_name, tool_input, blocked_reason, tokens_in, tokens_out, created_at from messages where conversation_id=$1 order by seq, id', [req.params.id])).rows;
   const feedback = (await q('select * from feedback where conversation_id=$1 order by id', [req.params.id])).rows;
   res.json({ ...conv, phone: decrypt(conv.phone), email: decrypt(conv.email), messages, feedback });
 });
-r.get('/admin/feedback/summary', admin, async (_req, res) => {
+r.get('/admin/feedback/summary', async (_req, res) => {
   const s = (await q(`select count(*) filter (where kind='survey' and not dismissed)::int surveys, round(avg(rating) filter (where kind='survey'),2) avg_rating,
                       count(*) filter (where resolved='yes')::int resolved_yes, count(*) filter (where resolved='partly')::int resolved_partly, count(*) filter (where resolved='no')::int resolved_no,
                       count(*) filter (where kind='thumb' and thumb=1)::int thumbs_up, count(*) filter (where kind='thumb' and thumb=-1)::int thumbs_down from feedback where created_at > now() - interval '30 days'`)).rows[0];
@@ -388,7 +384,7 @@ r.get('/admin/feedback/summary', admin, async (_req, res) => {
   const usage = (await q(`select * from usage_daily order by day desc limit 30`)).rows;
   res.json({ ...s, reasons, blocked, usage });
 });
-r.get('/admin/review-queue', admin, async (_req, res) => {
+r.get('/admin/review-queue', async (_req, res) => {
   const rows = (await q(`select m.id message_id, m.conversation_id, m.content answer, m.product,
                          coalesce((select array_agg(distinct x) from feedback r, unnest(r.reasons) x where r.message_id = m.id and r.kind = 'thumb_reason'), f.reasons) reasons, f.rating, f.thumb,
                          (select content from messages u where u.conversation_id=m.conversation_id and u.role='user' and u.id < m.id order by u.id desc limit 1) question
@@ -397,16 +393,18 @@ r.get('/admin/review-queue', admin, async (_req, res) => {
   res.json(rows);
 });
 // POST /admin/golden lives in admin.js (it embeds the question so the answer can be matched live)
-r.get('/admin/export/finetune.jsonl', admin, async (_req, res) => {
+r.get('/admin/export/finetune.jsonl', async (req, res) => {
   const sys = await stablePrompt();
   const rows = (await q('select question, context, ideal_answer from golden_answers order by id')).rows;
+  await audit(req, 'export.finetune', null, { rows: rows.length });
   res.setHeader('content-type', 'application/x-ndjson');
   for (const g of rows) res.write(JSON.stringify({ messages: [{ role: 'system', content: sys }, { role: 'user', content: `${g.context || ''}\n<message>\n${g.question}\n</message>` }, { role: 'assistant', content: g.ideal_answer }] }) + '\n');
   res.end();
 });
-r.get('/admin/export/leads.csv', admin, async (_req, res) => {
+r.get('/admin/export/leads.csv', async (req, res) => {
   const rows = (await q(`select l.created_at, v.name, v.phone, v.phone_type, v.email, v.email_type, l.company, l.industry, l.team_size, l.current_system, l.need, array_to_string(l.product_interest, '; ') products, l.demo_requested, l.status, v.marketing_opt_in, l.conversation_id
                          from leads l join visitors v on v.id=l.visitor_id order by l.created_at desc`)).rows;
+  await audit(req, 'export.leads', null, { rows: rows.length });
   res.setHeader('content-type', 'text/csv'); res.setHeader('content-disposition', 'attachment; filename=des-leads.csv');
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const cols = ['created_at', 'name', 'phone', 'phone_type', 'email', 'email_type', 'company', 'industry', 'team_size', 'current_system', 'need', 'products', 'demo_requested', 'status', 'marketing_opt_in', 'conversation_id'];
@@ -414,12 +412,22 @@ r.get('/admin/export/leads.csv', admin, async (_req, res) => {
   for (const x of rows) { const y = { ...x, phone: decrypt(x.phone), email: decrypt(x.email) }; res.write(cols.map((k) => esc(y[k])).join(',') + '\n'); }
   res.end();
 });
-r.post('/admin/ingest', admin, async (req, res) => { const url = req.body?.url; if (url) { res.json(await ingestUrl(url, { source: 'manual' })); } else { res.json({ started: true }); sweepSitemap().catch(console.error); } });
-r.get('/admin/kb', admin, async (_req, res) => {
+r.post('/admin/ingest', async (req, res) => { const url = req.body?.url; if (url) { res.json(await ingestUrl(url, { source: 'manual' })); } else { res.json({ started: true }); sweepSitemap().catch(console.error); } });
+r.get('/admin/kb', async (_req, res) => {
   const docs = (await q(`select d.id, d.url, d.title, d.kind, d.status, d.lastmod, d.updated_at, count(c.id)::int chunks from kb_documents d left join kb_chunks c on c.document_id=d.id group by d.id order by d.kind, d.title`)).rows;
   const log = (await q('select * from ingest_log order by id desc limit 50')).rows;
   res.json({ docs, log });
 });
-r.put('/admin/facts/:key', admin, async (req, res) => { await q('insert into facts(key,value) values($1,$2) on conflict(key) do update set value=excluded.value, updated_at=now()', [req.params.key, String(req.body?.value || '')]); res.json({ ok: true }); });
-r.post('/admin/prompt', admin, async (req, res) => { await q('update system_prompts set active=false'); await q('insert into system_prompts(version,text,active) values($1,$2,true)', [req.body?.version || new Date().toISOString(), String(req.body?.text || '')]); invalidatePrompt(); res.json({ ok: true }); });
-r.delete('/admin/visitors/:id', admin, async (req, res) => { await q('delete from visitors where id=$1', [req.params.id]); res.json({ ok: true }); }); // DPA erasure (cascades)
+r.put('/admin/facts/:key', async (req, res) => { await q('insert into facts(key,value) values($1,$2) on conflict(key) do update set value=excluded.value, updated_at=now()', [req.params.key, String(req.body?.value || '')]); res.json({ ok: true }); });
+r.post('/admin/prompt', async (req, res) => {
+  const version = req.body?.version || new Date().toISOString();
+  await q('update system_prompts set active=false'); await q('insert into system_prompts(version,text,active) values($1,$2,true)', [version, String(req.body?.text || '')]); invalidatePrompt();
+  await audit(req, 'prompt.changed', version, { chars: String(req.body?.text || '').length });
+  res.json({ ok: true });
+});
+r.delete('/admin/visitors/:id', async (req, res) => { // DPA erasure (cascades)
+  const v = (await q('select name from visitors where id=$1', [req.params.id])).rows[0];
+  await q('delete from visitors where id=$1', [req.params.id]);
+  await audit(req, 'visitor.deleted', req.params.id, { name: v?.name || null });
+  res.json({ ok: true });
+});

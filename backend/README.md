@@ -19,7 +19,15 @@ Switch on the real model: set `IQ_GATEWAY_KEY` (a `gws_…` key from IQLicense �
 
 ## Admin dashboard
 
-`http://localhost:8787/admin` (served from `../admin`). Sign in with `ADMIN_TOKEN` from `.env`.
+`http://localhost:8787/admin` (served from `../admin`). Each person signs in with their own email and password.
+
+First account (stop the backend first when using the embedded database):
+
+```bash
+npm run user:create -- --role superuser --email you@dynamiqes.com --name "Your Name"
+```
+
+After that, a superuser adds people in **Users**. Roles: **Superuser** (everything, incl. users, DES instructions, audit log, system settings, deleting visitor data), **Admin** (everything except those), **User** (overview, conversations and leads; phone and email masked; no exports). The table is in `src/permissions.js`. Five wrong passwords lock an account for 15 minutes. `npm run user:reset-password -- --email …` resets a password from the command line. `ADMIN_TOKEN` is now only the machine token `npm run stop` uses.
 
 - **Overview**: chats, questions, leads, handoffs, ratings, approved-answer use, AI cost, questions per day, product interest, activity feed.
 - **Conversations / Leads**: transcripts with tool calls, guardrail changes and feedback; lead status; CSV export; visitor data erasure.
@@ -53,9 +61,9 @@ The local database (PGlite) is a folder of files and a hard kill can corrupt it.
 | POST | `/api/handoff` | JWT | visitor-initiated "Connect to a consultant" |
 | POST | `/api/end` | JWT | close + one-line summary |
 | POST | `/api/ingest/webhook` | HMAC `x-des-signature` | WordPress publish/update/trash → re-ingest one URL |
-| GET | `/api/admin/leads` · `/admin/conversations/:id` · `/admin/feedback/summary` · `/admin/review-queue` · `/admin/kb` | `ADMIN_TOKEN` | admin data |
-| POST | `/api/admin/golden` · `/admin/ingest` · `/admin/prompt` · PUT `/admin/facts/:key` · DELETE `/admin/visitors/:id` | `ADMIN_TOKEN` | review queue, re-ingest, prompt version, facts, DPA erasure |
-| GET | `/api/admin/export/leads.csv` · `/admin/export/finetune.jsonl` | `ADMIN_TOKEN` | exports |
+| GET | `/api/admin/leads` · `/admin/conversations/:id` · `/admin/feedback/summary` · `/admin/review-queue` · `/admin/kb` | signed-in user (role) | admin data |
+| POST | `/api/admin/golden` · `/admin/ingest` · `/admin/prompt` · PUT `/admin/facts/:key` · DELETE `/admin/visitors/:id` | signed-in user (role) | review queue, re-ingest, prompt version, facts, DPA erasure |
+| GET | `/api/admin/export/leads.csv` · `/admin/export/finetune.jsonl` | signed-in user (role) | exports |
 | GET/POST/PUT/DELETE | `/api/admin/overview` · `/activity` · `/conversations` · `/conversations/:id/detail` · `/products` · `/products/:name` · `/products/:name/notes` · `/golden` · `/golden/:id` · `/match` · `/test` · `/kb/:id` · `/facts` · `/glossary` · `/prompt` · `/status` · `/leads/:id` | `ADMIN_TOKEN` | dashboard API (`src/admin.js`) |
 
 ## Request flow (`/api/chat`)

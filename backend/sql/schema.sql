@@ -244,3 +244,44 @@ update visitors set person_key = phone_hash where phone_hash is not null and per
 alter table visitors add column if not exists first_name text;
 alter table visitors add column if not exists last_name text;
 update visitors set first_name = split_part(name, ' ', 1), last_name = nullif(substr(name, length(split_part(name, ' ', 1)) + 2), '') where first_name is null;
+
+-- ---- dashboard accounts, sessions, audit log, system settings (2026-10-13) ----
+create table if not exists users (
+  id uuid primary key default gen_random_uuid(),
+  email text unique not null,
+  name text,
+  role text not null default 'user',          -- superuser | admin | user (permissions.js)
+  password_hash text not null,                -- bcrypt
+  failed_logins int not null default 0,       -- 5 in a row locks the account for 15 minutes
+  locked_until timestamptz,
+  disabled boolean not null default false,
+  created_at timestamptz default now(),
+  last_login_at timestamptz
+);
+create table if not exists admin_sessions (    -- dashboard sign-ins (cookie des_admin holds the token; only its hash is stored)
+  token_hash text primary key,
+  user_id uuid references users(id) on delete cascade,
+  created_at timestamptz default now(),
+  expires_at timestamptz not null,
+  last_seen_at timestamptz default now(),
+  ip text,
+  user_agent text
+);
+create index if not exists admin_sessions_user_idx on admin_sessions(user_id);
+create table if not exists audit_log (         -- who did what, when (kept when a user is deleted)
+  id bigserial primary key,
+  at timestamptz default now(),
+  user_id uuid,
+  user_email text,
+  action text not null,                        -- login, login.failed, export.leads, visitor.deleted, prompt.changed, user.role_changed, …
+  target text,
+  detail jsonb,
+  ip text
+);
+create index if not exists audit_log_at_idx on audit_log(at);
+create table if not exists app_settings (      -- dashboard overrides of .env values (settings.js)
+  key text primary key,
+  value text,
+  updated_by text,
+  updated_at timestamptz default now()
+);

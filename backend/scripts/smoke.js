@@ -1,7 +1,13 @@
 // End-to-end smoke test against a running API: node scripts/smoke.js [http://localhost:8787/api]
+// Admin checks run when SMOKE_EMAIL and SMOKE_PASSWORD (a dashboard account) are set.
 import 'dotenv/config';
 const base = process.argv[2] || `http://localhost:${process.env.PORT || 8787}/api`;
-const admin = { authorization: 'Bearer ' + (process.env.ADMIN_TOKEN || '') };
+let admin = null;
+if (process.env.SMOKE_EMAIL && process.env.SMOKE_PASSWORD) {
+  const r = await fetch(base + '/admin/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: process.env.SMOKE_EMAIL, password: process.env.SMOKE_PASSWORD }) });
+  const c = (r.headers.getSetCookie?.() || []).find((x) => x.startsWith('des_admin='));
+  if (c) admin = { cookie: c.split(';')[0] }; else console.log('SMOKE_EMAIL / SMOKE_PASSWORD did not sign in; skipping admin checks');
+}
 const j = async (path, body, headers = {}) => { const r = await fetch(base + path, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined }); const t = await r.text(); let d; try { d = JSON.parse(t); } catch { d = t; } if (!r.ok) throw new Error(`${path} ${r.status} ${t.slice(0, 200)}`); return d; };
 const sse = async (path, body, headers) => {
   const r = await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -16,9 +22,9 @@ const h = await j('/health'); ok('health', h.ok, `mock=${h.mock} model=${h.model
 
 // bad session attempts
 let e; try { await j('/session', { name: 'x', consent: { version: '2026-10-01' } }); } catch (x) { e = x; } ok('rejects bad name', /400/.test(e?.message));
-try { e = null; await j('/session', { name: 'Mark Sagaad', contact: '0917 123 4567' }); } catch (x) { e = x; } ok('rejects missing consent', /consent_required/.test(e?.message));
+try { e = null; await j('/session', { name: 'Mark Sagaad', phone: '0917 123 4583' }); } catch (x) { e = x; } ok('rejects missing consent', /consent_required/.test(e?.message));
 
-const s = await j('/session', { name: 'mark sagaad', contact: '0917 123 4567', consent: { version: '2026-10-01', method: 'chip' }, marketing_opt_in: false, lang: 'en', page_url: 'http://test/' });
+const s = await j('/session', { name: 'mark sagaad', phone: '0917 123 4583', consent: { version: '2026-10-01', method: 'chip' }, marketing_opt_in: false, lang: 'en', page_url: 'http://test/' });
 ok('session created', !!s.token && s.first_name === 'mark', `conversation ${s.session_id}`);
 const auth = { authorization: 'Bearer ' + s.token };
 
@@ -50,8 +56,8 @@ ok('feedback stored', true);
 const ho = await j('/handoff', { reason: 'visitor' }, auth); ok('handoff', ho.ok === true, ho.already ? 'already' : 'emailed (console)');
 await j('/end', {}, auth); ok('end + summary', true);
 
-if (process.env.ADMIN_TOKEN) {
-  const leads = await j('/admin/leads', null, admin); ok('admin leads', Array.isArray(leads) && leads.length >= 1, `${leads.length} lead(s); contact=${leads[0]?.contact}`);
+if (admin) {
+  const leads = await j('/admin/leads', null, admin); ok('admin leads', Array.isArray(leads) && leads.length >= 1, `${leads.length} lead(s); phone=${leads[0]?.phone}`);
   const conv = await j('/admin/conversations/' + s.session_id, null, admin); ok('admin transcript', conv.messages.length >= 8, `${conv.messages.length} rows, status=${conv.status}`);
   const fb = await j('/admin/feedback/summary', null, admin); ok('admin feedback summary', fb.surveys >= 1, `avg=${fb.avg_rating} blocked=${JSON.stringify(fb.blocked)}`);
   const kb = await j('/admin/kb', null, admin); ok('admin kb', kb.docs.length > 60, `${kb.docs.length} docs`);

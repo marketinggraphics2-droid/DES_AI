@@ -10,7 +10,12 @@ export const cfg = {
   websiteUrl: (process.env.WEBSITE_URL || '').replace(/\/$/, ''),
   allowedOrigins: [...list(process.env.ALLOWED_ORIGINS), ...list(process.env.WEBSITE_URL).map((u) => new URL(u).origin)],
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
-  adminToken: process.env.ADMIN_TOKEN || '',
+  adminToken: process.env.ADMIN_TOKEN || '', // only for npm run stop / the shutdown call from this computer; dashboard users sign in
+  // Express 'trust proxy': which proxies may set X-Forwarded-For. loopback = cloudflared on this computer;
+  // behind DigitalOcean's load balancer use 1 (one hop) or its address range.
+  trustProxy: (() => { const v = process.env.TRUST_PROXY ?? 'loopback'; return /^\d+$/.test(v) ? Number(v) : v === 'true' ? true : v; })(),
+  // trust Cloudflare's CF-Connecting-IP from any peer (only when every request comes through Cloudflare); otherwise only from this computer
+  trustCloudflare: process.env.TRUST_CLOUDFLARE === 'true',
   // admin dashboard + admin API answer only on this computer (localhost); add public IPs here to allow remote admins
   adminAllowedIps: list(process.env.ADMIN_ALLOWED_IPS),
   // ...or anyone signed in through Cloudflare Access (Zero Trust → Access → Applications). Both empty = off.

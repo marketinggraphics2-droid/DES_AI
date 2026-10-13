@@ -99,7 +99,8 @@ read -rsp "Value: " V; echo; sed -i "s|^IQ_GATEWAY_KEY=.*|IQ_GATEWAY_KEY=$V|" /o
 | `IQ_GATEWAY_KEY` | AI access through IQGateway. Empty = mock mode (canned answers) |
 | `PUBLIC_URL` | `https://des.dynamiqes.org`. Used in the embed code the dashboard shows |
 | `ALLOWED_ORIGINS` | Fixed list of websites allowed to show the chat. More sites can be added in **Dashboard → Settings → Website widget** without touching `.env` |
-| `ADMIN_TOKEN` | Password for the dashboard. Read it with `grep ADMIN_TOKEN /opt/des/backend/.env` |
+| `ADMIN_TOKEN` | Machine token for `npm run stop` only. People sign in with their own accounts: create the first one with `npm run user:create -- --role superuser --email …` (stop the backend first if it uses the embedded database) |
+| `TRUST_PROXY` | `1` behind the DigitalOcean load balancer, so the real visitor IP is used; `loopback` with cloudflared on the same machine |
 | `ADMIN_ALLOWED_IPS` | IPs that may open `/admin` (currently the office IP). Everyone else gets 404 |
 | `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` | Optional: lets people signed in through Cloudflare Access open `/admin` from anywhere |
 | `EMBEDDINGS_PROVIDER`, `VOYAGE_API_KEY` | `hash` = basic keyword search. `voyage` + key = better search; re-run the ingest after switching |

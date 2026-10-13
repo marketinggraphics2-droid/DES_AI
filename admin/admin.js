@@ -1,20 +1,15 @@
-/* DES admin dashboard · vanilla JS, served by the backend at /admin. Data comes from /api/admin/* (ADMIN_TOKEN). */
+/* DES admin dashboard · vanilla JS, served by the backend at /admin. Data comes from /api/admin/* (signed-in user; what is shown depends on the role). */
 (() => {
   'use strict';
 
   // ---------------- basics ----------------
-  const TOKEN_KEY = 'des_admin_token';
-  const store = {
-    get() { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
-    set(v) { try { localStorage.setItem(TOKEN_KEY, v); } catch { } },
-    del() { try { localStorage.removeItem(TOKEN_KEY); } catch { } },
-  };
-  let token = store.get();
   const $ = (s, r = document) => r.querySelector(s);
   const main = $('#main'), layer = $('#layer');
   const GENERAL = 'General';
   const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'closed'];
-  const state = { status: null, products: [], days: 30 };
+  const state = { status: null, products: [], days: 30, me: null, perms: new Set() };
+  /** The server enforces every permission; this only hides what the signed-in role can't use. */
+  const can = (p) => state.perms.has(p);
 
   /** h('div', {class, text, on:{click}, ...attrs}, ...children) — never parses HTML unless `html` is passed (trusted/escaped only). */
   function h(tag, attrs, ...kids) {
@@ -76,11 +71,13 @@
 
   async function api(path, { method = 'GET', body, raw = false } = {}) {
     const r = await fetch('/api' + path, {
-      method,
-      headers: { authorization: 'Bearer ' + token, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+      method, credentials: 'same-origin',
+      // x-des-admin: changes need a header a form on another website can't send
+      headers: { ...(method !== 'GET' ? { 'x-des-admin': '1' } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    if (r.status === 401) { showLogin('Your sign-in expired or the token changed. Sign in again.'); throw new Error('unauthorized'); }
+    if (r.status === 401) { showLogin('Your sign-in expired. Sign in again.'); throw new Error('unauthorized'); }
+    if (r.status === 403) throw new Error('Your role can’t do that.');
     if (!r.ok) { let msg = `Request failed (${r.status})`; try { const j = await r.json(); msg = j.error ? j.error.replace(/_/g, ' ') : msg; } catch { } throw new Error(msg); }
     return raw ? r : r.json();
   }
@@ -104,25 +101,44 @@
   // ---------------- login / shell ----------------
   function showLogin(msg = '') {
     $('#app').hidden = true; $('#login').hidden = false;
-    $('#loginErr').textContent = msg; $('#tokenInput').value = ''; $('#tokenInput').focus();
+    $('#loginErr').textContent = msg; $('#passwordInput').value = ''; ($('#emailInput').value ? $('#passwordInput') : $('#emailInput')).focus();
   }
   $('#loginForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    token = $('#tokenInput').value.trim();
     try {
-      const r = await fetch('/api/admin/status', { headers: { authorization: 'Bearer ' + token } });
-      if (!r.ok) { $('#loginErr').textContent = r.status === 401 ? 'That token is not right. Copy the whole ADMIN_TOKEN value.' : `The backend answered ${r.status}. Is it running?`; return; }
-      store.set(token); boot();
+      const r = await fetch('/api/admin/auth/login', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: $('#emailInput').value.trim(), password: $('#passwordInput').value }) });
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 423) { $('#loginErr').textContent = `Too many wrong passwords. Try again after ${new Date(j.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}, or ask a superuser to unlock you.`; return; }
+      if (!r.ok) { $('#loginErr').textContent = r.status === 401 ? 'Wrong email or password.' : `The backend answered ${r.status}. Is it running?`; $('#passwordInput').value = ''; return; }
+      boot();
     } catch { $('#loginErr').textContent = 'Could not reach the backend. Is it running?'; }
   });
-  function signOut() { store.del(); token = null; showLogin('Signed out.'); }
+  async function signOut() { try { await api('/admin/auth/logout', { method: 'POST', body: {} }); } catch { } showLogin('Signed out.'); }
 
   async function boot() {
-    if (!token) return showLogin();
-    try { state.status = await api('/admin/status'); } catch (e) { if (e.message !== 'unauthorized') showLogin('Could not reach the backend. Is it running?'); return; }
+    try { const me = await api('/admin/auth/me'); state.me = me.user; state.perms = new Set(me.permissions); state.status = await api('/admin/status'); }
+    catch (e) { if (e.message !== 'unauthorized') showLogin('Could not reach the backend. Is it running?'); return; }
+    // menu: only the pages this role may open
+    document.querySelectorAll('#nav button[data-perm]').forEach((b) => { b.hidden = !b.dataset.perm.split(' ').some(can); });
     $('#login').hidden = true; $('#app').hidden = false;
     renderFoot(); refreshReviewCount();
     if (!location.hash) location.hash = '#/overview'; else route();
+  }
+  function openPassword() {
+    const cur = h('input', { class: 'input', type: 'password', autocomplete: 'current-password', required: true });
+    const pw = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', minLength: 10, required: true });
+    const pw2 = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', required: true });
+    const form = h('form', { class: 'modal__card', on: { submit: async (e) => {
+      e.preventDefault();
+      if (pw.value !== pw2.value) return toast('The new passwords do not match', true);
+      try { await api('/admin/auth/password', { method: 'POST', body: { current: cur.value, password: pw.value } }); toast('Password changed. Other devices were signed out.'); closeLayer(); } catch (err) { fail(err); }
+    } }, style: { width: 'min(440px, 100%)' } }, h('div', { class: 'modal__head' }, h('h2', { text: 'Change password' })),
+      h('div', { class: 'modal__body' },
+        h('label', { class: 'field' }, h('span', { text: 'Current password' }), cur),
+        h('label', { class: 'field' }, h('span', { text: 'New password (at least 10 characters)' }), pw),
+        h('label', { class: 'field' }, h('span', { text: 'Repeat new password' }), pw2)),
+      h('div', { class: 'modal__foot' }, h('button', { class: 'btn', type: 'button', text: 'Cancel', on: { click: closeLayer } }), h('button', { class: 'btn btn--primary', type: 'submit', text: 'Change password' })));
+    openLayer(h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Change password' }, form), true); cur.focus();
   }
   async function renderFoot() {
     const s = state.status, foot = $('#sideFoot'); foot.replaceChildren();
@@ -131,10 +147,13 @@
       h('div', null, h('span', { class: 'dot' + (s.mock ? ' is-mock' : '') }), s.mock ? 'Mock mode (no AI key)' : 'Live AI'),
       h('div', { text: s.model }),
       budget ? h('div', { text: `Today: ${usd(budget.spent)} of ${usd(budget.budget)} budget` }) : null,
+      h('div', { class: 'side__user' }, h('b', { text: state.me.name || state.me.email }), ' ', badge({ superuser: 'Superuser', admin: 'Admin', user: 'User' }[state.me.role] || state.me.role)),
+      h('button', { type: 'button', text: 'Change password', on: { click: openPassword } }),
       h('button', { type: 'button', text: 'Sign out', on: { click: signOut } }),
     );
   }
   async function refreshReviewCount() {
+    if (!can('finetune.manage')) return;
     try { const q = await api('/admin/review-queue'); const b = $('#reviewCount'); b.hidden = !q.length; b.textContent = q.length; } catch { }
   }
   $('#nav').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-page]'); if (b) location.hash = '#/' + b.dataset.page; });
@@ -146,8 +165,10 @@
     const arg = rest.length ? decodeURIComponent(rest.join('/')) : null;
     document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('is-on', b.dataset.page === page));
     closeLayer();
-    const pages = { overview: pageOverview, conversations: pageConversations, leads: pageLeads, finetune: pageFinetune, review: pageReview, kb: pageKb, settings: pageSettings };
-    (pages[page] || pageOverview)(arg);
+    const pages = { overview: pageOverview, conversations: pageConversations, leads: pageLeads, finetune: pageFinetune, review: pageReview, kb: pageKb, settings: pageSettings, users: pageUsers, audit: pageAudit };
+    const btn = document.querySelector(`#nav button[data-page="${page}"]`);
+    if (!pages[page] || !btn || btn.hidden) return pageOverview(); // not this role's page
+    pages[page](arg);
     main.focus({ preventScroll: true }); window.scrollTo(0, 0);
   }
   function top(title, sub, ...tools) {
@@ -390,7 +411,7 @@
     head.replaceChildren(
       h('div', null, h('h2', { text: c.name }), h('div', { class: 'meta-line', style: { marginTop: '4px' } }, statusBadge(c.status), when(c.started_at), c.lang === 'fil' ? badge('Filipino') : null)),
       h('button', { class: 'x', type: 'button', 'aria-label': 'Close', text: '✕', on: { click: closeLayer } }));
-    const thread = renderThread(c.messages, { goldenById, thumbs, reasons, canSave: true });
+    const thread = renderThread(c.messages, { goldenById, thumbs, reasons, canSave: can('finetune.manage') });
     const tabs = h('div', { class: 'ptabs', role: 'tablist' });
     const panel = h('div', { role: 'tabpanel' }, thread);
     if (c.other_conversations > 0) {
@@ -420,7 +441,7 @@
       ))),
       tabs.children.length ? tabs : null,
       panel,
-      h('div', { style: { marginTop: '28px', paddingTop: '14px', borderTop: '1px solid var(--line)' } },
+      !can('visitors.delete') ? null : h('div', { style: { marginTop: '28px', paddingTop: '14px', borderTop: '1px solid var(--line)' } },
         h('button', { class: 'btn btn--danger btn--sm', type: 'button', text: 'Delete this visitor’s data', on: { click: async () => {
           if (!confirm(`Permanently delete ${c.name}'s details, chats and lead? Use this for Data Privacy Act erasure requests. This cannot be undone.`)) return;
           try { await api('/admin/visitors/' + c.visitor_id, { method: 'DELETE' }); toast('Visitor data deleted'); closeLayer(); route(); } catch (e) { fail(e); }
@@ -432,7 +453,7 @@
   async function pageLeads() {
     loading();
     let rows; try { rows = await api('/admin/leads'); } catch (e) { return fail(e); }
-    const dl = h('button', { class: 'btn', type: 'button', text: 'Download CSV', on: { click: async () => {
+    const dl = !can('leads.export') ? null : h('button', { class: 'btn', type: 'button', text: 'Download CSV', on: { click: async () => {
       try { const r = await api('/admin/export/leads.csv', { raw: true }); const url = URL.createObjectURL(await r.blob()); const a = h('a', { href: url, download: `des-leads-${new Date().toISOString().slice(0, 10)}.csv` }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); } catch (e) { fail(e); }
     } } });
     main.replaceChildren(
@@ -722,9 +743,12 @@
   // ---------------- settings ----------------
   async function pageSettings() {
     loading();
-    let facts, gloss, prompt, bans, sites; try { [facts, gloss, prompt, bans, sites] = await Promise.all([api('/admin/facts'), api('/admin/glossary'), api('/admin/prompt'), api('/admin/bans'), api('/admin/sites')]); } catch (e) { return fail(e); }
+    const get = (perm, path, empty) => (can(perm) ? api(path) : Promise.resolve(empty));
+    let facts, gloss, prompt, bans, sites, settings;
+    try { [facts, gloss, prompt, bans, sites, settings] = await Promise.all([get('facts.manage', '/admin/facts', []), get('facts.manage', '/admin/glossary', []), get('prompt.manage', '/admin/prompt', {}), get('bans.manage', '/admin/bans', { active: 0, by_kind: {}, bans: [] }), get('settings.manage', '/admin/sites', { base: '', fixed: [], sites: [] }), get('settings.manage', '/admin/settings', [])]); } catch (e) { return fail(e); }
     const s = state.status;
     const embedCode = `<script src="${sites.base}/widget/embed.js" data-api="${sites.base}/api" defer></script>`;
+    const settingInputs = settings.map((x) => { const i = h('input', { class: 'input', type: 'number', min: 0, step: '0.5', value: x.value ?? '', placeholder: String(x.effective), 'aria-label': x.label }); i.dataset.key = x.key; return { x, i }; });
     const codeTa = h('textarea', { class: 'input mono', rows: 2, readOnly: true, 'aria-label': 'Embed code', on: { focus: (e) => e.target.select() } }); codeTa.value = embedCode;
     const copyCode = async () => {
       try { await navigator.clipboard.writeText(embedCode); } catch { codeTa.select(); document.execCommand('copy'); }
@@ -767,6 +791,12 @@
     main.replaceChildren(
       top('Settings', 'Facts and terms DES always knows, and how it is connected.'),
       h('div', { class: 'stack' },
+        !can('settings.manage') ? null : h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'System' }), h('p', { text: 'Overrides the server settings straight away, no restart. Leave empty for the server default.' })),
+          h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Save', on: { click: async () => {
+            const body = Object.fromEntries(settingInputs.map(({ x, i }) => [x.key, i.value === '' ? null : Number(i.value)]));
+            try { await api('/admin/settings', { method: 'PUT', body }); toast('Saved'); state.status = await api('/admin/status'); renderFoot(); pageSettings(); } catch (e) { fail(e); }
+          } } })),
+          h('div', { class: 'card__body' }, h('dl', { class: 'kv' }, settingInputs.map(({ x, i }) => [h('dt', { text: x.label }), h('dd', null, i, h('div', { class: 'note', text: `${x.help} Now: ${x.effective}${x.updated_by ? ` · changed by ${x.updated_by} ${when(x.updated_at)}` : ''}` }))])))),
         h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('h2', { text: 'Connection' })), h('div', { class: 'card__body' }, h('dl', { class: 'kv' },
           h('dt', { text: 'Mode' }), h('dd', { text: s.mock ? 'Mock (no AI key; canned answers)' : 'Live AI through IQGateway' }),
           h('dt', { text: 'AI model' }), h('dd', { class: 'mono', text: s.model }),
@@ -775,7 +805,7 @@
           h('dt', { text: 'Answer matching' }), h('dd', { text: `An approved answer is used when the match score is at least ${Math.round(s.golden_min_score * 100)}% (GOLDEN_MIN_SCORE).` }),
           h('dt', { text: 'Daily AI budget' }), h('dd', { text: usd(s.daily_budget_usd) + ' (DAILY_BUDGET_USD)' }),
         ))),
-        h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Website widget' }),
+        !can('settings.manage') ? null : h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Website widget' }),
             h('p', { text: 'Paste this code into an allowed website (WordPress: the site footer) and the chat appears bottom-right. On any other website it stays hidden.' })),
           h('button', { class: 'btn btn--primary btn--sm', type: 'button', text: 'Copy code', on: { click: copyCode } })),
           h('div', { class: 'card__body' }, codeTa,
@@ -785,7 +815,7 @@
             sites.fixed.map((o) => siteRow(o, { fixed: true })),
             sites.sites.map((x) => siteRow(x.origin, x)),
             h('tr', null, h('td', null, newSite), h('td', null, newNote), h('td', null), h('td', { style: { textAlign: 'right' } }, h('button', { class: 'btn btn--sm', type: 'button', text: '+ Add website', on: { click: addSite } }))))))),
-        h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Bans after ended chats' }),
+        !can('bans.manage') ? null : h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Bans after ended chats' }),
             h('p', { text: 'When DES ends a chat for repeated off-topic or abusive messages, that device, contact and visitor are paused for 24 h and the connection for 1 h.' })),
           h('button', { class: 'btn btn--danger', type: 'button', disabled: !bans.active, text: 'Lift all bans', on: { click: async () => {
             if (!confirm('Lift every active ban now? Banned visitors can start a new chat straight away.')) return;
@@ -794,13 +824,13 @@
           h('div', { class: 'card__body' }, bans.active
             ? h('p', { style: { margin: 0 }, text: `${n(bans.active)} active ban${bans.active === 1 ? '' : 's'} (${Object.entries(bans.by_kind).map(([k, v]) => `${v} ${({ ip: 'connection', device: 'device', visitor: 'visitor', contact: 'contact' })[k] || k}`).join(', ')}) from ${n(bans.ended_chats)} ended chat${bans.ended_chats === 1 ? '' : 's'}. Latest ends ${when(bans.bans.map((b) => b.until).sort().at(-1))}.` })
             : h('p', { class: 'muted', style: { margin: 0 }, text: 'No active bans.' }))),
-        h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Company facts' }), h('p', { text: 'Sent to DES with every message. Keep them short and exact.' })),
+        !can('facts.manage') ? null : h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Company facts' }), h('p', { text: 'Sent to DES with every message. Keep them short and exact.' })),
           h('button', { class: 'btn btn--sm', type: 'button', text: '+ Add fact', on: { click: () => { factBody.append(factRow(undefined, true)); factBody.lastElementChild.querySelector('input').focus(); } } })),
           h('div', { class: 'table-wrap' }, h('table', null, factBody))),
-        h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Glossary' }), h('p', { text: 'When a visitor uses one of these terms, DES gets the plain-language meaning.' })),
+        !can('facts.manage') ? null : h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', null, h('h2', { text: 'Glossary' }), h('p', { text: 'When a visitor uses one of these terms, DES gets the plain-language meaning.' })),
           h('button', { class: 'btn btn--sm', type: 'button', text: '+ Add term', on: { click: () => { glossBody.append(glossRow(undefined, true)); glossBody.lastElementChild.querySelector('input').focus(); } } })),
           h('div', { class: 'table-wrap' }, h('table', null, glossBody))),
-        h('details', { class: 'card' }, h('summary', { class: 'card__head', style: { cursor: 'pointer' } }, h('div', null, h('h2', { text: 'Bot instructions (advanced)' }), h('p', { text: `Version ${prompt.version || 'from file'} · persona, rules and tone. Most changes belong in approved answers or product notes instead.` }))),
+        !can('prompt.manage') ? null : h('details', { class: 'card' }, h('summary', { class: 'card__head', style: { cursor: 'pointer' } }, h('div', null, h('h2', { text: 'Bot instructions (advanced)' }), h('p', { text: `Version ${prompt.version || 'from file'} · persona, rules and tone. Most changes belong in approved answers or product notes instead.` }))),
           h('div', { class: 'card__body' },
             h('div', { class: 'callout', style: { marginBottom: '12px' } }, 'Saving creates a new version and DES uses it immediately. A broken edit can make every answer worse, so test a few questions in Fine-tune answers afterwards.'),
             promptTa,
@@ -811,6 +841,71 @@
             } } })))),
       ),
     );
+  }
+
+  // ---------------- users (superuser) ----------------
+  const ROLE_OPTS = [['user', 'User · reads chats and leads, contacts masked'], ['admin', 'Admin · also answers, knowledge, exports, share links'], ['superuser', 'Superuser · everything incl. users, instructions, audit']];
+  async function pageUsers() {
+    loading();
+    let users; try { users = await api('/admin/users'); } catch (e) { return fail(e); }
+    const roleSelect = (value, on) => { const s = h('select', { class: 'input', 'aria-label': 'Role', on: { change: on } }, ROLE_OPTS.map(([v, t]) => h('option', { value: v, text: t.split(' · ')[0] }))); s.value = value; return s; };
+    const update = async (u, body, msg) => { try { await api('/admin/users/' + u.id, { method: 'PUT', body }); toast(msg); pageUsers(); } catch (e) { fail(e); pageUsers(); } };
+    const resetPw = async (u) => {
+      const pw = prompt(`New password for ${u.email} (at least 10 characters). Tell them to change it after signing in.`); if (!pw) return;
+      try { await api(`/admin/users/${u.id}/password`, { method: 'POST', body: { password: pw } }); toast('Password reset; their other sessions were signed out'); } catch (e) { fail(e); }
+    };
+    const rows = users.map((u) => h('tr', null,
+      h('td', null, h('div', { text: u.name || '—', style: { fontWeight: 600 } }), h('div', { class: 'muted', text: u.email })),
+      h('td', null, roleSelect(u.role, (e) => update(u, { role: e.target.value }, 'Role changed'))),
+      h('td', { class: 'muted', text: u.last_login_at ? when(u.last_login_at) : 'never' }),
+      h('td', null, u.disabled ? badge('Disabled', 'badge--bad') : u.locked_until && new Date(u.locked_until) > new Date() ? badge('Locked', 'badge--bad') : badge('Active', 'badge--good')),
+      h('td', { style: { whiteSpace: 'nowrap', textAlign: 'right' } },
+        u.locked_until && new Date(u.locked_until) > new Date() ? h('button', { class: 'btn btn--sm', type: 'button', text: 'Unlock', on: { click: () => update(u, { unlock: true }, 'Unlocked') } }) : null, ' ',
+        h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Reset password', on: { click: () => resetPw(u) } }), ' ',
+        u.id === state.me.id ? null : h('button', { class: 'btn btn--sm btn--ghost' + (u.disabled ? '' : ' btn--danger'), type: 'button', text: u.disabled ? 'Enable' : 'Disable', on: { click: () => update(u, { disabled: !u.disabled }, u.disabled ? 'Enabled' : 'Disabled; signed out everywhere') } }))));
+    const email = h('input', { class: 'input', type: 'email', placeholder: 'name@dynamiqes.com', required: true, 'aria-label': 'Email' });
+    const name = h('input', { class: 'input', placeholder: 'Full name', 'aria-label': 'Name' });
+    const role = roleSelect('user', () => { });
+    const pw = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', minLength: 10, placeholder: 'First password (10+ characters)', required: true, 'aria-label': 'Password' });
+    const add = h('form', { class: 'filters', on: { submit: async (e) => {
+      e.preventDefault();
+      try { await api('/admin/users', { method: 'POST', body: { email: email.value.trim(), name: name.value.trim(), role: role.value, password: pw.value } }); toast('User added'); pageUsers(); } catch (err) { fail(err); }
+    } } }, email, name, role, pw, h('button', { class: 'btn btn--primary', type: 'submit', text: 'Add user' }));
+    main.replaceChildren(
+      top('Users', 'Who can sign in to this dashboard and what each role may do. Every change is in the audit log.'),
+      h('section', { class: 'card' }, h('div', { class: 'card__head' }, add),
+        h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, ['User', 'Role', 'Last sign-in', 'Status', ''].map((t) => h('th', { text: t })))), h('tbody', null, rows)))),
+      h('section', { class: 'card', style: { marginTop: '16px' } }, h('div', { class: 'card__body' }, h('dl', { class: 'kv' }, ROLE_OPTS.map(([v, t]) => [h('dt', { text: t.split(' · ')[0] }), h('dd', { text: t.split(' · ')[1] })])))),
+    );
+  }
+
+  // ---------------- audit log (superuser) ----------------
+  const AUDIT_LABEL = { login: 'Signed in', 'login.failed': 'Wrong password', 'login.locked': 'Locked after wrong passwords', logout: 'Signed out', 'password.changed': 'Changed own password',
+    'export.leads': 'Exported leads CSV', 'export.finetune': 'Exported approved answers', 'visitor.deleted': 'Deleted visitor data', 'prompt.changed': 'Changed DES instructions',
+    'user.created': 'Added user', 'user.role_changed': 'Changed role', 'user.disabled': 'Disabled user', 'user.enabled': 'Enabled user', 'user.unlocked': 'Unlocked user', 'user.password_reset': 'Reset password',
+    'settings.changed': 'Changed system settings', 'bans.lifted': 'Lifted bans', 'site.added': 'Allowed a website', 'site.removed': 'Removed a website',
+    'share.created': 'Created share link', 'share.viewed': 'Share link opened', 'share.revoked': 'Revoked share link' };
+  async function pageAudit() {
+    const SIZE = 50; const f = { action: '', user: '' };
+    const tbody = h('tbody'), pagerBox = h('div');
+    const load = async (page = 1) => {
+      const qs = new URLSearchParams({ limit: SIZE, offset: (page - 1) * SIZE }); if (f.action) qs.set('action', f.action); if (f.user) qs.set('user', f.user);
+      let rows, total; try { const r = await api('/admin/audit?' + qs, { raw: true }); total = Number(r.headers.get('x-total-count')) || 0; rows = await r.json(); } catch (e) { return fail(e); }
+      tbody.replaceChildren(...(rows.length ? rows.map((a) => h('tr', null,
+        h('td', { class: 'muted', text: when(a.at), style: { whiteSpace: 'nowrap' } }),
+        h('td', { text: a.user_email || '—' }),
+        h('td', null, h('b', { text: AUDIT_LABEL[a.action] || a.action }), a.target ? h('div', { class: 'muted mono', text: a.target }) : null),
+        h('td', { class: 'muted mono', text: a.detail ? JSON.stringify(a.detail) : '' }),
+        h('td', { class: 'muted mono', text: a.ip || '' }))) : [h('tr', null, h('td', { colspan: 5 }, empty('Nothing logged yet', 'Sign-ins, exports, deletions and changes appear here.')))]));
+      pagerBox.replaceChildren(...[pager(total, page, SIZE, load)].filter(Boolean));
+    };
+    const action = h('select', { class: 'input', 'aria-label': 'Action', on: { change: () => { f.action = action.value; load(); } } }, h('option', { value: '', text: 'All actions' }),
+      [['login', 'Sign-ins'], ['export', 'Exports'], ['visitor', 'Visitor data'], ['prompt', 'Instructions'], ['user', 'Users'], ['share', 'Share links'], ['settings', 'Settings']].map(([v, t]) => h('option', { value: v, text: t })));
+    const who = h('input', { class: 'input', type: 'search', placeholder: 'User email…', 'aria-label': 'User', on: { input: debounce(() => { f.user = who.value.trim(); load(); }) } });
+    main.replaceChildren(top('Audit log', 'Who did what and when. Visible to superusers only.'),
+      h('section', { class: 'card' }, h('div', { class: 'card__head' }, h('div', { class: 'filters' }, action, who)),
+        h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, ['When', 'Who', 'What', 'Details', 'IP'].map((t) => h('th', { text: t })))), tbody)), pagerBox));
+    load();
   }
 
   // ---------------- layers ----------------

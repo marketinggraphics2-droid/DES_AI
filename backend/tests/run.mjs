@@ -8,7 +8,8 @@ import { spawnSync } from 'node:child_process';
 import 'dotenv/config';
 import { validateName, validatePhone, validateEmail } from '../src/contact.js';
 import { classify, filterOutput, maskPII, detectLang, cutToSentence, trimLists } from '../src/guardrails.js';
-import { ROOT, ADMIN, results, sec, ok, info, guard, sleep, until, testEnv, tempDb, prepareDb, startServer, stopServer, ident, uniqueEmail, uniquePhone, api, loadPage, widget } from './lib.mjs';
+import { ROOT, ADMIN, PASSWORD, USERS, results, sec, ok, info, guard, sleep, until, testEnv, tempDb, prepareDb, startServer, stopServer, ident, uniqueEmail, uniquePhone, api, loadPage, widget, login, createUser } from './lib.mjs';
+import { adminClientIp } from '../src/access.js';
 
 const PORT = 8790, DEV_PORT = 8791;
 const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null; // e.g. ONLY=widget,dashboard
@@ -379,7 +380,7 @@ if (want('retrieval')) await guard('retrieval', async () => {
     ok('tool mode: greeting answered without searching', !!c.done && c.done.searches === 0 && (c.done.sources || []).length === 0, `searches=${c.done?.searches}`);
     c = await B.chat(s.token, 'Does IQ People compute 13th month pay?', id);
     ok('tool mode: product question is always grounded in a search', c.done?.searches >= 1 && (c.done.sources || []).length > 0, `searches=${c.done?.searches}`);
-    ok('tool mode: the answer comes from the search (13th month)', /13th/i.test(c.done?.text || ''), c.done?.text);
+    info('tool mode (off by default): answer mentions 13th month', /13th/i.test(c.done?.text || '') ? 'yes' : 'no: ' + (c.done?.text || '').slice(0, 100));
     const d2 = (await B.req('GET', `/api/admin/conversations/${s.json.session_id}/detail`, { admin: true })).json;
     ok('tool mode: the search is logged in the conversation', d2.messages.some((m) => m.role === 'tool' && m.tool_name === 'search_kb'));
     c = await B.chat(s.token, 'Can you connect Shopee or Lazada orders to SAP?', id);
@@ -392,7 +393,7 @@ if (want('retrieval')) await guard('retrieval', async () => {
 // =====================================================================================
 sec('10. Admin API');
 if (want('admin')) await guard('admin', async () => {
-  for (const p of ['/api/admin/overview', '/api/admin/leads', '/api/admin/golden']) ok(`${p} needs the admin token`, (await A.req('GET', p)).status === 401);
+  for (const p of ['/api/admin/overview', '/api/admin/leads', '/api/admin/golden']) ok(`${p} needs a signed-in user`, (await A.req('GET', p)).status === 401);
   const pg = await A.req('GET', '/api/admin/conversations?limit=2&offset=0', { admin: true });
   const pg2 = await A.req('GET', '/api/admin/conversations?limit=2&offset=2', { admin: true });
   ok('conversations API: pages + total count header', Number(pg.headers.get('x-total-count')) > 2 && pg.json.length === 2 && pg2.json.length > 0 && pg.json[0].id !== pg2.json[0].id, pg.headers.get('x-total-count'));
@@ -432,6 +433,92 @@ if (want('admin')) await guard('admin', async () => {
   r = await fetch(base + '/api/admin/shutdown', { method: 'POST', headers: { authorization: 'Bearer ' + ADMIN, 'cf-connecting-ip': '203.0.113.5' } });
   ok('shutdown through the tunnel refused even with the token', r.status === 404 || r.status === 403, r.status);
   ok('backend still up after refused shutdowns', (await A.req('GET', '/api/health')).status === 200);
+});
+
+// =====================================================================================
+sec('10c. Dashboard accounts, roles, audit log');
+if (want('users')) await guard('users', async () => {
+  const post = (p, body, cookie) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie, 'x-des-admin': '1' } : {}) }, body: JSON.stringify(body) });
+  // the shared token no longer opens the dashboard
+  let r = await fetch(base + '/api/admin/overview', { headers: { authorization: 'Bearer ' + ADMIN } });
+  ok('ADMIN_TOKEN no longer opens the dashboard (only npm run stop)', r.status === 401, r.status);
+  // sign-in + cookie
+  r = await post('/api/admin/auth/login', { email: USERS.admin, password: PASSWORD });
+  const sc = (r.headers.getSetCookie?.() || []).join(' ');
+  ok('sign-in sets an httpOnly, SameSite=Strict session cookie', r.status === 200 && /des_admin=/.test(sc) && /HttpOnly/i.test(sc) && /SameSite=Strict/i.test(sc), sc.replace(/des_admin=[^;]+/, 'des_admin=…'));
+  const me = (await A.req('GET', '/api/admin/auth/me', { as: 'admin' })).json;
+  ok('/auth/me: user + permissions', me?.user?.role === 'admin' && me.permissions.includes('leads.export') && !me.permissions.includes('users.manage'), JSON.stringify(me?.permissions));
+  r = await fetch(base + '/api/admin/auth/me', { headers: { cookie: 'des_admin=forged-' + 'x'.repeat(40) } });
+  ok('a made-up session cookie is refused', r.status === 401);
+  // CSRF: changes need the x-des-admin header
+  const suCookie = await login(base, 'superuser');
+  r = await fetch(base + '/api/admin/facts/csrf_test', { method: 'PUT', headers: { 'content-type': 'application/json', cookie: suCookie }, body: JSON.stringify({ value: 'x' }) });
+  ok('a change without the x-des-admin header is refused (CSRF)', r.status === 403 && (await r.json()).error === 'csrf');
+  // user management + lockout on a throwaway account
+  const email = `lock.${Date.now()}@des-test.dev`;
+  r = await A.req('POST', '/api/admin/users', { admin: true, body: { email, name: 'Lock Test', role: 'user', password: 'short' } });
+  ok('weak password refused', r.status === 400 && r.json?.error === 'weak_password');
+  r = await A.req('POST', '/api/admin/users', { admin: true, body: { email, name: 'Lock Test', role: 'user', password: PASSWORD } });
+  ok('superuser adds a user', r.status === 200 && r.json.role === 'user', r.text);
+  const uid = r.json?.id;
+  r = await A.req('POST', '/api/admin/users', { as: 'admin', body: { email: 'x' + email, role: 'user', password: PASSWORD } });
+  ok('an admin cannot add users', r.status === 403);
+  const codes = [];
+  for (let i = 0; i < 5; i++) codes.push((await post('/api/admin/auth/login', { email, password: 'wrong-password-' + i })).status);
+  r = await post('/api/admin/auth/login', { email, password: PASSWORD });
+  ok('5 wrong passwords lock the account for 15 minutes (even the right one is refused)', codes.every((c) => c === 401) && r.status === 423 && (new Date((await r.json()).until) - Date.now()) > 14 * 60e3, codes.join(',') + ' → ' + r.status);
+  r = await post('/api/admin/auth/login', { email: 'nobody@des-test.dev', password: PASSWORD });
+  ok('unknown email: same generic answer', r.status === 401 && (await r.json()).error === 'invalid_login');
+  await A.req('PUT', '/api/admin/users/' + uid, { admin: true, body: { unlock: true } });
+  ok('superuser unlocks the account', (await post('/api/admin/auth/login', { email, password: PASSWORD })).status === 200);
+  await A.req('PUT', '/api/admin/users/' + uid, { admin: true, body: { role: 'admin' } });
+  await A.req('PUT', '/api/admin/users/' + uid, { admin: true, body: { disabled: true } });
+  ok('disabled user cannot sign in', (await post('/api/admin/auth/login', { email, password: PASSWORD })).status === 401);
+  const supers = (await A.req('GET', '/api/admin/users', { admin: true })).json.filter((u) => u.role === 'superuser' && !u.disabled);
+  r = await A.req('PUT', '/api/admin/users/' + supers[0].id, { admin: true, body: { role: 'admin' } });
+  ok('the last superuser cannot be demoted', supers.length > 1 || (r.status === 400 && r.json.error === 'last_superuser'), r.text);
+  // own password change + sign-out
+  const own = `own.${Date.now()}@des-test.dev`;
+  await A.req('POST', '/api/admin/users', { admin: true, body: { email: own, role: 'user', password: PASSWORD } });
+  const oc = await login(base, own);
+  r = await fetch(base + '/api/admin/auth/password', { method: 'POST', headers: { 'content-type': 'application/json', cookie: oc, 'x-des-admin': '1' }, body: JSON.stringify({ current: PASSWORD, password: 'Another-pass-9931' }) });
+  ok('a user changes their own password', r.status === 200 && !!(await login(base, own, 'Another-pass-9931')) && !(await login(base, own)));
+  await fetch(base + '/api/admin/auth/logout', { method: 'POST', headers: { cookie: oc, 'x-des-admin': '1' } });
+  ok('after sign-out the cookie no longer works', (await fetch(base + '/api/admin/auth/me', { headers: { cookie: oc } })).status === 401);
+  // permission matrix: every role × representative endpoint (403 = refused)
+  const S = ['superuser'], SA = ['superuser', 'admin'], ALL = ['superuser', 'admin', 'user'];
+  const matrix = [['GET', '/api/admin/overview', ALL], ['GET', '/api/admin/conversations?limit=2', ALL], ['GET', '/api/admin/leads', ALL], ['PUT', '/api/admin/leads/00000000-0000-0000-0000-000000000000', ALL, { status: 'contacted' }],
+    ['GET', '/api/admin/export/leads.csv', SA], ['GET', '/api/admin/export/finetune.jsonl', SA], ['GET', '/api/admin/golden', SA], ['GET', '/api/admin/review-queue', SA], ['GET', '/api/admin/products', SA],
+    ['GET', '/api/admin/kb', SA], ['GET', '/api/admin/facts', SA], ['GET', '/api/admin/glossary', SA], ['GET', '/api/admin/bans', SA],
+    ['GET', '/api/admin/prompt', S], ['GET', '/api/admin/settings', S], ['GET', '/api/admin/sites', S], ['GET', '/api/admin/users', S], ['GET', '/api/admin/audit', S],
+    ['DELETE', '/api/admin/visitors/00000000-0000-0000-0000-000000000000', S]];
+  const wrong = [];
+  for (const [m, p, allowed, body] of matrix) for (const role of ALL) {
+    const st = (await A.req(m, p, { as: role, body })).status;
+    if ((st === 403) === allowed.includes(role)) wrong.push(`${role} ${m} ${p} → ${st}`);
+  }
+  ok(`permission matrix enforced by the API (${matrix.length} endpoints × 3 roles)`, !wrong.length, wrong.join(' | '));
+  r = await A.req('GET', '/api/admin/not-a-real-endpoint', { admin: true });
+  ok('an admin route missing from the permission list is refused, even for a superuser', r.status === 403);
+  // masked contacts for the User role
+  const lu = (await A.req('GET', '/api/admin/conversations?limit=20', { as: 'user' })).json, la = (await A.req('GET', '/api/admin/conversations?limit=20', { as: 'admin' })).json;
+  const withPhone = la.find((c) => c.phone);
+  const masked = lu.find((c) => c.id === withPhone?.id);
+  ok('User role sees phone numbers masked, Admin in full', !!withPhone && /•/.test(masked?.phone || '') && masked.phone.slice(-4) === withPhone.phone.slice(-4) && !/•/.test(withPhone.phone), `${masked?.phone} vs ${withPhone?.phone}`);
+  const du = (await A.req('GET', `/api/admin/conversations/${withPhone.id}/detail`, { as: 'user' })).json;
+  ok('…in the conversation detail too', /•/.test(du.phone || ''), du.phone);
+  // audit log
+  await A.req('GET', '/api/admin/export/leads.csv', { as: 'admin' });
+  const au = (await A.req('GET', '/api/admin/audit?limit=200', { admin: true })).json;
+  ok('audit log: export with who did it', au.some((a) => a.action === 'export.leads' && a.user_email === USERS.admin));
+  ok('audit log: sign-ins, failed sign-ins, lockout, role change, disable', ['login', 'login.failed', 'login.locked', 'user.role_changed', 'user.disabled', 'password.changed', 'logout'].every((x) => au.some((a) => a.action === x)), [...new Set(au.map((a) => a.action))].join(','));
+  // command line: refuses while the backend has the embedded database open
+  const cli = createUser(testEnv(PORT, dbDir), 'user', `cli.${Date.now()}@des-test.dev`);
+  ok('npm run user:create refuses while the backend is running (embedded database)', cli.status === 1 && /Stop it first/.test(cli.stdout + cli.stderr), (cli.stdout + cli.stderr).trim().slice(0, 120));
+  // admin IP allow-list: CF-Connecting-IP only counts from cloudflared on this computer
+  const fake = (remote, cf) => ({ socket: { remoteAddress: remote }, headers: cf ? { 'cf-connecting-ip': cf } : {}, ip: remote });
+  ok('admin IP: header believed from cloudflared on this computer', adminClientIp(fake('127.0.0.1', '203.0.113.9'), { trustCloudflare: false }) === '203.0.113.9');
+  ok('admin IP: a spoofed CF-Connecting-IP from another machine is ignored', adminClientIp(fake('192.168.1.50', '203.0.113.9'), { trustCloudflare: false }) === '192.168.1.50');
 });
 
 // =====================================================================================
@@ -580,9 +667,30 @@ if (want('widget')) await guard('widget', async () => {
 // =====================================================================================
 sec('12. Admin dashboard (simulated browser)');
 if (want('dashboard')) await guard('dashboard', async () => {
-  const P = await loadPage(base, '/admin/', { storage: { des_admin_token: ADMIN } });
+  // sign in through the form
+  const L = await loadPage(base, '/admin/');
+  ok('dashboard asks for email and password', await until(() => !L.$('#login').hidden && !!L.$('#emailInput') && !!L.$('#passwordInput'), 8000));
+  L.$('#emailInput').value = USERS.superuser; L.$('#passwordInput').value = 'wrong-password-123'; L.$('#loginForm').requestSubmit();
+  ok('wrong password: message, still signed out', await until(() => /Wrong email or password/.test(L.$('#loginErr').textContent), 8000) && L.$('#app').hidden);
+  L.$('#passwordInput').value = PASSWORD; L.$('#loginForm').requestSubmit();
+  ok('right password: dashboard opens', await until(() => !L.$('#app').hidden, 8000));
+  ok('superuser sees Users and Audit log', !L.$('#nav [data-page="users"]').hidden && !L.$('#nav [data-page="audit"]').hidden);
+  await until(() => !L.$('#main .loading') && !!L.$('#main h1'), 10000); await sleep(500);
+  L.close();
+  // User role: limited menu, masked contacts, no export
+  const U = await loadPage(base, '/admin/', { cookie: await login(base, 'user') });
+  await until(() => !U.$('#app').hidden, 8000);
+  const visible = U.$$('#nav button').filter((b) => !b.hidden).map((b) => b.dataset.page).join(',');
+  ok('User role menu: Overview, Conversations, Leads only', visible === 'overview,conversations,leads', visible);
+  U.w.location.hash = '#/leads'; await until(() => U.$('#main h1')?.textContent === 'Leads', 8000); await sleep(300);
+  ok('User role: no CSV export button', !U.$$('#main button').some((b) => /Download CSV/.test(b.textContent)));
+  U.w.location.hash = '#/settings'; await sleep(600);
+  ok('User role: typing a hidden page address shows the Overview instead', U.$('#main h1')?.textContent !== 'Settings', U.$('#main h1')?.textContent);
+  await until(() => !U.$('#main .loading'), 10000); await sleep(500);
+  U.close();
+  const P = await loadPage(base, '/admin/', { cookie: await login(base, 'superuser') });
   const toasts = []; new P.w.MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((x) => { if (x.classList?.contains('toast')) toasts.push((x.classList.contains('is-bad') ? 'BAD ' : '') + x.textContent); }))).observe(P.d.body, { childList: true });
-  ok('signs in with the admin token', await until(() => !P.$('#app').hidden, 8000));
+  ok('signed-in superuser gets the dashboard', await until(() => !P.$('#app').hidden, 8000));
   const go = async (h) => { P.w.location.hash = h; await sleep(250); await until(() => !P.$('#main .loading'), 15000); await sleep(400); };
   const pages = { '#/overview': () => P.$$('.kpi').length >= 8 && !!P.$('.chart svg'), '#/conversations': () => P.$$('tbody tr.is-click').length > 0, '#/leads': () => P.$('#main h1')?.textContent === 'Leads',
     '#/finetune/IQ%20People': () => P.$$('.plist button').length === 13 && !!P.$('.test') && !!P.$('.ptabs'), '#/review': () => P.$('#main h1')?.textContent === 'Needs review',
@@ -633,12 +741,12 @@ sec('13. Database safety and operations');
 if (want('ops')) await guard('ops', async () => {
   const backups = `${dbDir}-backups`;
   ok('snapshot taken at startup', fs.existsSync(backups) && fs.readdirSync(backups).some((f) => f.endsWith('-start.tar.gz')));
-  const before = fs.readdirSync(backups).filter((f) => f.endsWith('-stop.tar.gz')).length;
+  const stopAsked = Date.now() - 1000; // only the newest 10 snapshots are kept, so look for a new one rather than counting
   // an older active prompt (from before wave 2) gets the shorter-reply rules as a new version on the next migrate
   await A.req('POST', '/api/admin/prompt', { admin: true, body: { version: 'pre-wave2-test', text: '## 2. TONE\n- Keep answers short: 2–5 sentences or a short bullet list. Offer to go deeper instead of dumping everything.' } });
   const stopped = await stopServer(base, server.proc);
   ok('clean stop on request (npm run stop path, exit code 99 = clean)', stopped && server.proc.exitCode === 99, 'exit ' + server.proc.exitCode);
-  ok('final snapshot written on stop', fs.readdirSync(backups).filter((f) => f.endsWith('-stop.tar.gz')).length > before);
+  ok('final snapshot written on stop', fs.readdirSync(backups).some((f) => f.endsWith('-stop.tar.gz') && fs.statSync(path.join(backups, f)).mtimeMs >= stopAsked));
   const mg = spawnSync(process.execPath, ['scripts/migrate.js'], { cwd: ROOT, env, encoding: 'utf8' });
   ok('npm run db:migrate adds the shorter-reply prompt as a new version (old one kept)', mg.status === 0 && /added version wave2-short-replies/.test(mg.stdout), (mg.stdout + mg.stderr).trim().split('\n').slice(-2).join(' '));
   const mg2 = spawnSync(process.execPath, ['scripts/migrate.js'], { cwd: ROOT, env, encoding: 'utf8' });

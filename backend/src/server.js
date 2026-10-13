@@ -6,13 +6,15 @@ import { cfg, isMock } from './config.js';
 import { r } from './routes.js';
 import { adminRouter, backfillGolden } from './admin.js';
 import { upgradePrompt } from './prompt.js';
-import { accessUser } from './access.js';
+import { accessUser, adminClientIp } from './access.js';
+import { adminAuth, authRouter } from './auth.js';
+import { invalidateSettings } from './settings.js';
 import { loadSites, isAllowedOrigin, anySitesConfigured } from './sites.js';
 import { pool, exec } from './db.js';
 import fs from 'node:fs';
 
 const app = express();
-app.set('trust proxy', 1);
+app.set('trust proxy', cfg.trustProxy);
 app.use(cors({ origin: (o, cb) => cb(null, !o || !anySitesConfigured() || isAllowedOrigin(o)), credentials: false }));
 // the widget's last log on page close comes via navigator.sendBeacon: text/plain body (no CORS pre-check) with the token inside
 app.use('/api/log', express.text({ type: 'text/plain', limit: '64kb' }), (req, _res, next) => {
@@ -26,10 +28,10 @@ app.use(express.json({ limit: '32kb' }));
 // "Proxied" = arrived through the Cloudflare tunnel / a proxy (they add these headers); direct = this computer.
 const isProxied = (req) => !!(req.headers['cf-connecting-ip'] || req.headers['cf-ray'] || req.headers['x-forwarded-for']);
 const isLocal = (req) => !isProxied(req) && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
-const clientIp = (req) => String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
 // 1) Admin dashboard + admin API: only on this computer, ADMIN_ALLOWED_IPS, or a Cloudflare Access login. Everyone else gets a plain 404.
 app.use(['/admin', '/api/admin'], async (req, res, next) => {
-  if (isLocal(req) || cfg.adminAllowedIps.includes(clientIp(req))) return next();
+  req.adminIp = adminClientIp(req);
+  if (isLocal(req) || cfg.adminAllowedIps.includes(req.adminIp)) return next();
   if (await accessUser(req)) return next();
   res.status(404).type('text/plain').send('Not found');
 });
@@ -46,6 +48,8 @@ app.use('/api', (req, res, next) => {
   res.status(403).json({ error: 'origin_not_allowed' });
 });
 app.use((req, _res, next) => { req.ip_raw = req.ip; next(); });
+// dashboard: signed-in user + permission check on every /api/admin route (auth.js, permissions.js)
+app.use('/api/admin', adminAuth, authRouter);
 app.use('/api', r);
 // npm run stop: admin token + only from this computer (not through the tunnel, which adds Cloudflare headers)
 app.post('/api/admin/shutdown', (req, res) => {
@@ -56,7 +60,7 @@ app.post('/api/admin/shutdown', (req, res) => {
   setTimeout(() => requestStop('stop requested', 99), 100); // 99 tells scripts/dev.js to exit instead of waiting
 });
 app.use('/api/admin', adminRouter);
-// admin dashboard (data is behind ADMIN_TOKEN; the page itself is static)
+// admin dashboard (data needs a signed-in user; the page itself is static)
 app.use('/admin', express.static(fileURLToPath(new URL('../../admin', import.meta.url)), { maxAge: 0 }));
 // widget files for the one-line embed (<script src=".../widget/embed.js">); any origin may load them
 app.use('/widget', express.static(process.env.WIDGET_DIR || fileURLToPath(new URL('../../widget', import.meta.url)), { maxAge: '1h' }));
@@ -66,6 +70,7 @@ app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ 
 await exec(fs.readFileSync(fileURLToPath(new URL('../sql/schema.sql', import.meta.url)), 'utf8'));
 await backfillGolden().catch((e) => console.error('approved-answer backfill', e.message));
 await upgradePrompt().catch((e) => console.error('prompt upgrade', e.message));
+await invalidateSettings().catch((e) => console.error('settings', e.message));
 await loadSites();
 
 const server = app.listen(cfg.port, () => {

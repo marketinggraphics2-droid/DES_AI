@@ -18,10 +18,13 @@
     "bg": "node scripts/bg.js",
     "stop": "node scripts/stop.js",
     "test": "node tests/run.mjs",
-    "eval": "node scripts/eval-retrieval.js"
+    "eval": "node scripts/eval-retrieval.js",
+    "user:create": "node scripts/user.js",
+    "user:reset-password": "node scripts/user.js --reset"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.0",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",

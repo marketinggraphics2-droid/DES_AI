@@ -31,7 +31,13 @@ export async function guard(label, fn, ms = 360000) {
 }
 
 // ---------------- isolated test backend ----------------
-export const ADMIN = 'test-admin-token-' + Math.random().toString(36).slice(2);
+export const ADMIN = 'test-admin-token-' + Math.random().toString(36).slice(2); // machine token: only npm run stop / shutdown
+/** Dashboard accounts created in every test database (npm run user:create). */
+export const PASSWORD = 'Test-password-4821';
+export const USERS = { superuser: 'super@des-test.dev', admin: 'admin@des-test.dev', user: 'user@des-test.dev' };
+export function createUser(env, role, email, password = PASSWORD) {
+  return spawnSync(process.execPath, ['scripts/user.js', '--role', role, '--email', email, '--name', role + ' tester', '--password-stdin'], { cwd: ROOT, env, input: password + '\n', encoding: 'utf8' });
+}
 export function testEnv(port, dbDir, extra = {}) {
   return {
     ...process.env, PORT: String(port), DATABASE_URL: 'pglite:' + dbDir, ADMIN_TOKEN: ADMIN, DES_TEST_HOOKS: '1',
@@ -46,6 +52,16 @@ export function prepareDb(env) {
     const r = spawnSync(process.execPath, [s], { cwd: ROOT, env, encoding: 'utf8' });
     if (r.status !== 0) throw new Error(`${s} failed: ${r.stderr || r.stdout}`);
   }
+  for (const [role, email] of Object.entries(USERS)) {
+    const r = createUser(env, role, email);
+    if (r.status !== 0) throw new Error(`user:create ${role} failed: ${r.stderr || r.stdout}`);
+  }
+}
+/** Sign in to the dashboard; returns the session cookie ("des_admin=…") or null. */
+export async function login(base, role = 'superuser', password = PASSWORD) {
+  const r = await fetch(base + '/api/admin/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: USERS[role] || role, password }) });
+  const c = (r.headers.getSetCookie?.() || []).find((x) => x.startsWith('des_admin='));
+  return r.ok && c ? c.split(';')[0] : null;
 }
 export async function startServer(env, { script = 'src/server.js' } = {}) {
   const proc = spawn(process.execPath, [script], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -73,13 +89,17 @@ export function uniquePhone(prefix = '0917') { for (;;) { const p = prefix + Str
 
 // ---------------- HTTP ----------------
 export function api(base) {
-  const headers = (id, token, admin) => ({
+  const cookies = {}; // role -> session cookie, signed in on first use
+  const headers = (id, token, cookie) => ({
     'content-type': 'application/json',
     ...(id ? { 'cf-connecting-ip': id.ip, 'x-des-device': id.dev, origin: base } : {}),
-    ...(token ? { authorization: 'Bearer ' + token } : {}), ...(admin ? { authorization: 'Bearer ' + ADMIN } : {}),
+    ...(token ? { authorization: 'Bearer ' + token } : {}), ...(cookie ? { cookie, 'x-des-admin': '1' } : {}),
   });
-  async function req(method, p, { body, id, token, admin, raw } = {}) {
-    const r = await fetch(base + p, { method, headers: headers(id, token, admin), body: body !== undefined ? JSON.stringify(body) : undefined });
+  /** admin: true = signed in as the test superuser; as: 'admin' | 'user' | 'superuser' for another role; cookie: a given session */
+  async function req(method, p, { body, id, token, admin, as, cookie, raw } = {}) {
+    const role = as || (admin ? 'superuser' : null);
+    if (role && !cookie) cookie = cookies[role] ||= await login(base, role);
+    const r = await fetch(base + p, { method, headers: headers(id, token, cookie), body: body !== undefined ? JSON.stringify(body) : undefined });
     if (raw) return r;
     const text = await r.text(); let json = null; try { json = JSON.parse(text); } catch { }
     return { status: r.status, json, text, headers: r.headers };
@@ -103,7 +123,7 @@ function nodeSignal(s) {
   if (s.aborted) ac.abort(); else s.addEventListener('abort', () => ac.abort());
   return ac.signal;
 }
-export async function loadPage(base, pagePath, { id, cfg = '', storage = {}, beforeScripts } = {}) {
+export async function loadPage(base, pagePath, { id, cfg = '', storage = {}, beforeScripts, cookie } = {}) {
   let html = await (await fetch(base + pagePath.split('?')[0])).text();
   html = html.replace('window.DES_CFG = { idleSurveyMs: 90 * 1000 };', `window.DES_CFG = { idleSurveyMs: 90 * 1000, typingMs: [0, 0], autoOpenMs: 0${cfg ? ', ' + cfg : ''} };`);
   const errors = [];
@@ -112,7 +132,15 @@ export async function loadPage(base, pagePath, { id, cfg = '', storage = {}, bef
   const dom = new JSDOM(html, {
     url: base + pagePath, runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true, virtualConsole: vc,
     beforeParse(w) {
-      w.fetch = (u, o = {}) => fetch(new URL(u, base), { ...o, signal: nodeSignal(o.signal), headers: { ...(o.headers || {}), ...(id ? { 'cf-connecting-ip': id.ip, origin: base } : {}) } });
+      // Node's fetch has no cookie jar: carry the dashboard session cookie by hand, and keep one set by a sign-in
+      const jar = { cookie };
+      w.fetch = async (u, o = {}) => {
+        const r = await fetch(new URL(u, base), { ...o, signal: nodeSignal(o.signal), headers: { ...(o.headers || {}), ...(id ? { 'cf-connecting-ip': id.ip, origin: base } : {}), ...(jar.cookie ? { cookie: jar.cookie } : {}) } });
+        const c = (r.headers.getSetCookie?.() || []).find((x) => x.startsWith('des_admin='));
+        if (c) jar.cookie = /Max-Age=0/i.test(c) ? null : c.split(';')[0];
+        return r;
+      };
+      w.__jar = jar;
       w.TextDecoder = TextDecoder; w.TextEncoder = TextEncoder;
       w.ResizeObserver = class { observe() { } disconnect() { } };
       w.scrollTo = () => { }; w.Element.prototype.scrollTo = () => { }; w.HTMLElement.prototype.scrollIntoView = () => { };

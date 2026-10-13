@@ -1,4 +1,4 @@
-// Admin API for the dashboard (../admin/index.html). Everything here is behind ADMIN_TOKEN.
+// Admin API for the dashboard (../admin/index.html). Everything here needs a signed-in user with the right role.
 // Older admin endpoints (leads, conversation detail, feedback summary, review queue, KB list, exports, ingest,
 // facts PUT, prompt POST, visitor erasure) stay in routes.js; the dashboard uses both.
 import { Router } from 'express';
@@ -10,6 +10,7 @@ import { stablePrompt, buildContext } from './prompt.js';
 import { answer } from './llm.js';
 import { detectLang, filterOutput, CANNED } from './guardrails.js';
 import { loadSites, toOrigin } from './sites.js';
+import { audit } from './auth.js';
 
 export const adminRouter = Router();
 const GENERAL = 'General'; // approved answers / questions not tied to one product
@@ -18,11 +19,7 @@ const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'closed'];
 // conversations of the same person as visitor $2: same visitor row, same phone (person_key), or same email on another sign-up
 const SAME_PERSON = `(c.visitor_id = $2 or exists (select 1 from visitors me where me.id = $2 and ((me.person_key is not null and v.person_key = me.person_key) or (me.email_hash is not null and v.email_hash = me.email_hash))))`;
 const MSG_COLS = 'id, seq, role, kind, source, content, original_content, incomplete, delivered, tool_name, tool_input, blocked_reason, product, golden_ids, tokens_in, tokens_out, cost_usd, created_at';
-adminRouter.use((req, res, next) => {
-  const tok = (req.headers.authorization || '').replace(/^Bearer /, '');
-  if (cfg.adminToken && tok === cfg.adminToken) return next();
-  res.status(401).json({ error: 'admin_only' });
-});
+// sign-in and permissions: adminAuth (auth.js) runs before this router
 const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
 const daysOf = (req) => Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
 const productParam = (name) => (name === GENERAL ? null : name);
@@ -222,7 +219,7 @@ adminRouter.post('/golden', wrap(async (req, res) => {
   const msgId = Number.isInteger(req.body?.message_id) ? req.body.message_id : null;
   const row = (await q(`insert into golden_answers(message_id, question, variations, context, ideal_answer, product, reviewed_by, active, embedding)
                         values($1,$2,$3,$4,$5,$6,$7,$8,$9::vector) returning id`,
-    [msgId, question, cleanVariations(req.body?.variations), clean(req.body?.context, 2000) || null, ideal, product, clean(req.body?.reviewed_by, 80) || 'dashboard', req.body?.active !== false, await embedOne(question)])).rows[0];
+    [msgId, question, cleanVariations(req.body?.variations), clean(req.body?.context, 2000) || null, ideal, product, req.user?.email || clean(req.body?.reviewed_by, 80) || 'dashboard', req.body?.active !== false, await embedOne(question)])).rows[0];
   res.json({ ok: true, id: Number(row.id) });
 }));
 
@@ -324,8 +321,9 @@ adminRouter.get('/bans', wrap(async (_req, res) => {
   const ended = (await q(`select count(*)::int n from conversations where status='ended' and ended_at > now() - make_interval(hours => $1)`, [hours])).rows[0].n;
   res.json({ active: active.length, by_kind: active.reduce((m, b) => ({ ...m, [b.kind]: (m[b.kind] || 0) + 1 }), {}), ended_chats: ended, bans: active });
 }));
-adminRouter.delete('/bans', wrap(async (_req, res) => {
+adminRouter.delete('/bans', wrap(async (req, res) => {
   const r = await q(`delete from rate_events where kind='ended'`);
+  await audit(req, 'bans.lifted', null, { lifted: r.rowCount });
   res.json({ ok: true, lifted: r.rowCount });
 }));
 
@@ -340,10 +338,12 @@ adminRouter.post('/sites', wrap(async (req, res) => {
   if (cfg.allowedOrigins.includes(origin)) return res.status(409).json({ error: 'That website is already allowed in the server settings' });
   await q('insert into allowed_sites(origin, note) values($1, $2) on conflict (origin) do update set note=excluded.note', [origin, clean(req.body?.note, 120) || null]);
   await loadSites();
+  await audit(req, 'site.added', origin);
   res.json({ ok: true, origin });
 }));
 adminRouter.delete('/sites', wrap(async (req, res) => {
   const r = await q('delete from allowed_sites where origin=$1', [String(req.query.origin || '')]);
   await loadSites();
+  await audit(req, 'site.removed', String(req.query.origin || ''));
   res.json({ ok: true, removed: r.rowCount });
 }));

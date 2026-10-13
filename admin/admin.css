@@ -267,3 +267,7 @@ td .muted, .muted { color: var(--ink-3); }
 .day-sep::before, .day-sep::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .history-conv.is-current .thread { outline: 2px solid var(--brand-line); outline-offset: 6px; border-radius: 6px; }
 .check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+
+/* signed-in user in the sidebar */
+.side__user { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; color: var(--side-ink); }
+.side__user b { font-weight: 600; }
