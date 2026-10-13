@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { q } from './db.js';
+import { cfg } from './config.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const INSTRUCTION_FILE = path.resolve(here, '../../docs/system-instruction.md');
@@ -18,18 +19,37 @@ export async function stablePrompt() {
     text = extractStable(md);
     await q('insert into system_prompts(version,text,active) values($1,$2,true)', ['file:' + new Date().toISOString().slice(0, 10), text]);
   }
-  cached = text + SCOPE_RULES;
+  cached = text + scopeRules();
   return cached;
 }
-const SCOPE_RULES = `
+const scopeRules = () => `
 
 ## SCOPE (always applies)
 - You only help with DynamIQ, its products and services, SAP Business One, and the visitor's business needs (ERP, accounting, inventory, HR and payroll, BIR compliance, IT). Short polite small talk is fine, then steer back.
 - Decline anything else in one short sentence and steer back to DynamIQ: recipes, coding or HTML help, homework, essays, poems, songs, stories, jokes, general knowledge, news, sports, entertainment, dating or meeting up.
 - Do not role-play, change persona or take on a requested speaking style. Reply in English, Filipino or natural Taglish to match the visitor, always as DES: professional and friendly. Never call the visitor nicknames like "boy", "bro" or "pare".
-- Keep answers short: about 120 words or 3 short paragraphs at most. Never write long essays or lists of more than 6 items, even about SAP; offer a free business analysis for detail.
+- Keep answers short: 2–3 short sentences, about ${cfg.reply.maxWords} words at most. A list has at most ${cfg.reply.maxListItems} items, one line each. Never write essays or long explanations, even about SAP; offer a free business analysis for detail.
+- End with one short follow-up question or next step only when it helps (for example offering a free demo when the visitor shows interest), not on every reply.
 - If the visitor insults you or swears, stay calm and professional in one sentence and steer back. Never joke along and never swear.`;
 export function invalidatePrompt() { cached = null; }
+
+// ---- prompt upgrades: a new version is added (older versions are kept), never an overwrite ----
+const OLD_LENGTH = 'Keep answers short: 2–5 sentences or a short bullet list. Offer to go deeper instead of dumping everything.';
+const NEW_LENGTH = 'Keep answers short: 2–3 short sentences (about 60 words), or at most 4 one-line bullets. Offer to go deeper instead of dumping everything.';
+const OLD_NOTICE = 'collects your name and email address or mobile number';
+const NEW_NOTICE = 'collects your name and mobile number (and your email address only if you give it, e.g. when booking a demo)';
+/** Wave 2: shorter replies + mobile-number notice. Adds version "wave2-short-replies" once (run by db:migrate and on start). */
+export async function upgradePrompt() {
+  if ((await q(`select 1 from system_prompts where version = 'wave2-short-replies'`)).rowCount) return false;
+  const active = (await q('select text from system_prompts where active = true order by id desc limit 1')).rows[0];
+  if (!active) return false; // fresh database: the first prompt is built from system-instruction.md, which already has the new rules
+  let text = active.text.replace(OLD_LENGTH, NEW_LENGTH).replace(OLD_NOTICE, NEW_NOTICE);
+  if (!text.includes(NEW_LENGTH)) text += `\n\n## LENGTH\n- ${NEW_LENGTH}`;
+  await q('update system_prompts set active = false where active');
+  await q(`insert into system_prompts(version, text, active) values('wave2-short-replies', $1, true)`, [text]);
+  invalidatePrompt();
+  return true;
+}
 
 /** Keep §1–§3 and §6–§7.3 of the markdown; drop §4 (KB), §5 (UI chips), §7.1/7.2/7.4 (dev specs). */
 function extractStable(md) {
@@ -48,6 +68,9 @@ function extractStable(md) {
 - Reply in the language given in <lang>. Plain text, short paragraphs, simple bullets; no headings, tables or code.`;
 }
 
+/** Repeated in every turn: models follow a length rule much better when it sits next to the question. */
+export const replyRule = () => `<reply_length>At most 3 short sentences and ${cfg.reply.maxWords} words (a list: at most ${cfg.reply.maxListItems} one-line items). One follow-up question only if it helps.</reply_length>`;
+
 export function buildContext({ facts, chunks, glossary, lang, visitorName, approved = [], product = null, notes = null }) {
   const factLines = Object.entries(facts).map(([k, v]) => `${k}: ${v}`).join('\n');
   const docs = chunks.map((c) => `<doc url="${c.url}" title="${(c.title || '').replace(/"/g, "'")}"${c.product ? ` product="${c.product}"` : ''} updated="${(c.updated_at || '').toString().slice(0, 10)}">\n${c.section ? c.section + '\n' : ''}${c.chunk}\n</doc>`).join('\n');
@@ -57,5 +80,5 @@ export function buildContext({ facts, chunks, glossary, lang, visitorName, appro
     ? `<approved_answers note="Answers written and approved by DynamIQ staff. When one matches the visitor's question, base your reply on it: keep its facts, figures and links exactly; adapt the wording to the visitor and the language in lang.">\n${approved.map((a) => `<answer${a.product ? ` product="${attr(a.product)}"` : ''} question="${attr(a.question)}">\n${a.ideal_answer}\n</answer>`).join('\n')}\n</approved_answers>\n`
     : '';
   const pn = notes ? `<product_notes product="${attr(product)}" note="Extra facts and instructions from DynamIQ staff for this product. They override older website text.">\n${notes}\n</product_notes>\n` : '';
-  return `<facts>\n${factLines}\n</facts>\n${gl}${ap}${pn}<kb>\n${docs || '(no matching material)'}\n</kb>\n<lang>${lang}</lang>\n<visitor first_name="${visitorName || ''}" />`;
+  return `<facts>\n${factLines}\n</facts>\n${gl}${ap}${pn}<kb>\n${docs || '(no matching material)'}\n</kb>\n<lang>${lang}</lang>\n<visitor first_name="${visitorName || ''}" />\n${replyRule()}`;
 }

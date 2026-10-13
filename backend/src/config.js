@@ -37,7 +37,13 @@ export const cfg = {
   chatBanHours: num(process.env.CHAT_BAN_HOURS, 24),             // how long an ended chat blocks that device / visitor / contact
   chatBanIpHours: num(process.env.CHAT_BAN_IP_HOURS, 1),           // shorter for the internet connection: an office shares one
   chatLlmScreen: process.env.CHAT_LLM_SCREEN !== 'false',        // small-model topic screen on every message
-  maxOutputTokens: num(process.env.MAX_OUTPUT_TOKENS, 600),
+  maxOutputTokens: num(process.env.MAX_OUTPUT_TOKENS, 300),
+  // reply length: the prompt asks for this; the output filter enforces the character and list limits
+  reply: {
+    maxWords: num(process.env.REPLY_MAX_WORDS, 60),         // 2–3 short sentences
+    maxListItems: num(process.env.REPLY_MAX_LIST_ITEMS, 4),  // one line each
+    maxChars: num(process.env.REPLY_MAX_CHARS, 700),        // longer replies are cut at the last complete sentence
+  },
   // a returning visitor within this many minutes continues the same conversation instead of starting a new one
   resumeWindowMin: num(process.env.RESUME_WINDOW_MIN, 30),
   testHooks: process.env.DES_TEST_HOOKS === '1', // test suite only: lets a request simulate an AI failure or a price in the reply

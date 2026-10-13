@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { cfg, isMock } from './config.js';
 import { r } from './routes.js';
 import { adminRouter, backfillGolden } from './admin.js';
+import { upgradePrompt } from './prompt.js';
 import { accessUser } from './access.js';
 import { loadSites, isAllowedOrigin, anySitesConfigured } from './sites.js';
 import { pool, exec } from './db.js';
@@ -64,6 +65,7 @@ app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ 
 // idempotent schema upgrade so new columns/tables exist without a manual migrate
 await exec(fs.readFileSync(fileURLToPath(new URL('../sql/schema.sql', import.meta.url)), 'utf8'));
 await backfillGolden().catch((e) => console.error('approved-answer backfill', e.message));
+await upgradePrompt().catch((e) => console.error('prompt upgrade', e.message));
 await loadSites();
 
 const server = app.listen(cfg.port, () => {

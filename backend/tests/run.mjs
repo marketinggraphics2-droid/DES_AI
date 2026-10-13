@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import 'dotenv/config';
 import { validateName, validatePhone, validateEmail } from '../src/contact.js';
-import { classify, filterOutput, maskPII, detectLang } from '../src/guardrails.js';
+import { classify, filterOutput, maskPII, detectLang, cutToSentence, trimLists } from '../src/guardrails.js';
 import { ROOT, ADMIN, results, sec, ok, info, guard, sleep, until, testEnv, tempDb, prepareDb, startServer, stopServer, ident, uniqueEmail, uniquePhone, api, loadPage, widget } from './lib.mjs';
 
 const PORT = 8790, DEV_PORT = 8791;
@@ -43,6 +43,14 @@ if (want('rules')) await guard('rules', async () => {
   ok('output filter flags risky claims', filterOutput('We are BIR-approved and guaranteed').reasons.includes('claim'));
   ok('output filter flags echoed visitor contact', filterOutput('We will call +639171234583', { visitorContact: ['+639171234583'] }).reasons.includes('contact_echo') && filterOutput('Mail ana@acme.ph', { visitorContact: ['+639171234583', 'ana@acme.ph'] }).reasons.includes('contact_echo'));
   ok('output filter strips headings and code', !/^#|```/m.test(filterOutput('# Title\n```js\nx\n```\nText').text));
+  const longReply = 'SAP Business One is an ERP for small and mid-size businesses. It covers sales, purchasing, inventory and accounting in one system. '.repeat(10);
+  let cut = filterOutput(longReply).text;
+  ok('long reply cut to 700 characters at the last complete sentence', cut.length <= 700 && /\.$/.test(cut) && longReply.startsWith(cut), `${cut.length} chars, ends "${cut.slice(-25)}"`);
+  ok('a reply under the limit is untouched', filterOutput('Yes, we do. Want a demo?').text === 'Yes, we do. Want a demo?');
+  cut = cutToSentence('x'.repeat(750) + ' is one long sentence. Short one.', 700);
+  ok('no sentence end within the limit: first full sentence kept, never cut mid-sentence', cut.endsWith('sentence.') && !cut.includes('Short'), cut.length);
+  ok('list trimmed to 4 items, text after it kept', trimLists('Options:\n- a\n- b\n- c\n- d\n- e\n- f\nWant a demo?', 4) === 'Options:\n- a\n- b\n- c\n- d\nWant a demo?');
+  ok('numbered lists trimmed too', filterOutput('Steps:\n1. a\n2. b\n3. c\n4. d\n5. e').text.split('\n').filter((l) => /^\d/.test(l)).length === 4);
   const m = maskPII('Card 4111 1111 1111 1111, TIN 123-456-789-000, call 0917 123 4583');
   ok('PII masking: card + TIN masked, phone kept', m.hits === 2 && m.text.includes('[redacted]') && m.text.includes('0917 123 4583'), m.text);
   ok('language: Filipino detected', detectLang('Magkano po ang SAP para sa amin?') === 'fil');
@@ -213,6 +221,7 @@ if (want('feedback')) await guard('feedback', async () => {
   r = await A.req('POST', '/api/feedback', { body: { kind: 'survey', rating: 4, resolved: 'yes' }, token: s.token, id }); ok('survey accepted', r.status === 200);
   const sum = (await A.req('GET', '/api/admin/feedback/summary', { admin: true })).json; ok('survey counted in summary', sum.surveys >= 1 && Number(sum.avg_rating) > 0);
   r = await A.req('POST', '/api/handoff', { body: { reason: 'visitor asked for a consultant' }, token: s.token, id }); ok('handoff accepted', r.status === 200);
+  r = await A.req('POST', '/api/handoff', { body: { reason: 'asked again' }, token: s.token, id }); ok('second handoff in the same chat: no second record or Sales email', r.json?.already === true, r.text);
   r = await A.req('POST', '/api/end', { body: {}, token: s.token, id }); ok('chat end accepted', r.status === 200);
   const det = (await A.req('GET', `/api/admin/conversations/${s.json.session_id}/detail`, { admin: true })).json;
   ok('handoff recorded, status "handed to sales"', det.status === 'handed_off' && det.handoffs.length >= 1, det.status);
@@ -319,6 +328,36 @@ if (want('capture')) await guard('capture', async () => {
   await A.chat(s2.token, 'our SAP is not working, error on login', id2); // a message, so the chat is listed
   const h = (await A.req('GET', `/api/admin/conversations/${s2.json.session_id}/history`, { admin: true })).json;
   ok('visitor history joins both sign-ups of the same person', h?.conversations?.length >= 2 && h.conversations.some((x) => x.id === cid), JSON.stringify((h?.conversations || []).map((x) => x.id.slice(0, 8))));
+});
+
+// =====================================================================================
+sec('9c. Reply length (real AI: 2–3 short sentences, lists of 4, 700-character cap)');
+if (want('length')) await guard('length', async () => {
+  const prompt = (await A.req('GET', '/api/admin/prompt', { admin: true })).json;
+  ok('active instructions ask for 2–3 short sentences', /2–3 short sentences/.test(prompt?.text || ''), (prompt?.text || '').match(/Keep answers short[^\n]*/)?.[0]);
+  const qs = ['Do you handle BIR CAS for a small trading company?', 'What is IQ Barcode?', 'What does SAP Business One do?', 'Can IQ People compute 13th month pay?',
+    'Can you connect Shopee orders to SAP?', 'Which product fits a 30-person distributor?', 'What modules does SAP Business One have?', 'How long does an SAP implementation take?',
+    'Ano ang IQ Ecom?', 'What services does DynamIQ offer?'];
+  const stats = [];
+  for (let i = 0; i < qs.length; i++) {
+    const id = ident(); const s = await A.session(id);
+    const c = await A.chat(s.token, qs[i], id);
+    if (!c.done || c.done.blocked) { info(`skipped (${c.done?.blocked || c.error?.code}): ${qs[i]}`); continue; }
+    const t = c.done.text;
+    const words = t.split(/\s+/).filter(Boolean).length;
+    const items = Math.max(0, ...t.split(/\n\s*\n/).map((blk) => blk.split('\n').filter((l) => /^\s*([-*•]|\d+[.)])\s+/.test(l)).length));
+    const tail = t.trim().replace(/[*_\s]+$/, '');
+    stats.push({ q: qs[i], t, words, chars: t.length, items, end: /[.!?…)]$/.test(tail) || /https?:\/\/\S+$/.test(tail) || /^\s*([-*•]|\d+[.)])/.test(tail.split('\n').at(-1)) });
+  }
+  const sorted = stats.map((x) => x.words).sort((a, b) => a - b);
+  const pct = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+  info('reply lengths (words)', stats.map((x) => x.words).join(', '));
+  ok('replies collected', stats.length >= 8, stats.length);
+  ok('every reply within 700 characters', stats.every((x) => x.chars <= 700), Math.max(...stats.map((x) => x.chars)));
+  ok('no list longer than 4 items', stats.every((x) => x.items <= 4), stats.map((x) => x.items).join(','));
+  ok('typical reply about 60 words (median ≤ 60)', pct(0.5) <= 60, 'median ' + pct(0.5));
+  ok('long replies are rare (90th percentile ≤ 80 words)', pct(0.9) <= 80, 'p90 ' + pct(0.9));
+  ok('every reply ends at a complete sentence or list line', stats.every((x) => x.end), stats.filter((x) => !x.end).map((x) => x.q + ' → …' + x.t.slice(-60)).join(' | '));
 });
 
 // =====================================================================================
@@ -452,7 +491,7 @@ if (want('widget')) await guard('widget', async () => {
   await W.waitIdle();
   // survey: rating and resolved are required choices; the comment step accepts typing
   await W.say('thanks, bye');
-  ok('survey rating: text box locked', await until(() => W.input.disabled && W.$$('.dq-chat__chips.is-rating button').length === 5, 8000));
+  ok('survey rating: text box locked', await until(() => W.input.disabled && W.$$('.dq-chat__chips.is-rating button').length === 5, 8000), W.bots().slice(-3).join(' | ').slice(-260) + ' ev=' + W.w.DES.data.events.filter((e) => /error|survey/.test(e.type)).map((e) => e.type + ':' + (e.message || '')).join(','));
   W.$$('.dq-chat__chips.is-rating').at(-1).querySelectorAll('button')[2].click(); await until(() => !W.input.disabled, 8000);
   ok('survey low rating: comment step lets the visitor type', !W.input.disabled);
   await W.chip(/Too technical/);
@@ -566,9 +605,15 @@ if (want('ops')) await guard('ops', async () => {
   const backups = `${dbDir}-backups`;
   ok('snapshot taken at startup', fs.existsSync(backups) && fs.readdirSync(backups).some((f) => f.endsWith('-start.tar.gz')));
   const before = fs.readdirSync(backups).filter((f) => f.endsWith('-stop.tar.gz')).length;
+  // an older active prompt (from before wave 2) gets the shorter-reply rules as a new version on the next migrate
+  await A.req('POST', '/api/admin/prompt', { admin: true, body: { version: 'pre-wave2-test', text: '## 2. TONE\n- Keep answers short: 2–5 sentences or a short bullet list. Offer to go deeper instead of dumping everything.' } });
   const stopped = await stopServer(base, server.proc);
   ok('clean stop on request (npm run stop path, exit code 99 = clean)', stopped && server.proc.exitCode === 99, 'exit ' + server.proc.exitCode);
   ok('final snapshot written on stop', fs.readdirSync(backups).filter((f) => f.endsWith('-stop.tar.gz')).length > before);
+  const mg = spawnSync(process.execPath, ['scripts/migrate.js'], { cwd: ROOT, env, encoding: 'utf8' });
+  ok('npm run db:migrate adds the shorter-reply prompt as a new version (old one kept)', mg.status === 0 && /added version wave2-short-replies/.test(mg.stdout), (mg.stdout + mg.stderr).trim().split('\n').slice(-2).join(' '));
+  const mg2 = spawnSync(process.execPath, ['scripts/migrate.js'], { cwd: ROOT, env, encoding: 'utf8' });
+  ok('…and only once', mg2.status === 0 && !/added version/.test(mg2.stdout), `exit ${mg2.status}: ${(mg2.stdout + mg2.stderr).trim().slice(-300)}`);
   const rdir = fs.mkdtempSync(path.join(os.tmpdir(), 'des-restore-')).replace(/\\/g, '/');
   fs.cpSync(backups, rdir + '/db-backups', { recursive: true });
   const rr = spawnSync(process.execPath, ['scripts/restore-db.js'], { cwd: ROOT, env: { ...env, DATABASE_URL: 'pglite:' + rdir + '/db' }, encoding: 'utf8' });

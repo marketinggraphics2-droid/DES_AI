@@ -10,7 +10,8 @@ if (cfg.databaseUrl.startsWith('pglite:')) {
   const dir = cfg.databaseUrl.slice('pglite:'.length) || './data/pglite';
   (await import('node:fs')).mkdirSync(dir, { recursive: true });
   const db = await PGlite.create(dir, { extensions: { vector } });
-  const norm = (r) => ({ rows: r.rows, rowCount: r.affectedRows ?? r.rows.length });
+  // PGlite reports affectedRows = 0 for a SELECT: count the returned rows then, like pg does
+  const norm = (r) => ({ rows: r.rows, rowCount: r.rows.length || r.affectedRows || 0 });
   // Snapshots: PGlite is a folder of files and a hard kill can corrupt it, so keep restorable copies
   // (scripts/restore-db.js). Taken after a successful open, every 30 min and on clean shutdown; last 10 kept.
   const fsp = await import('node:fs/promises');

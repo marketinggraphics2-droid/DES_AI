@@ -58,7 +58,28 @@ const PRICE = [/₱\s?\d/, /\bPHP\s?\d/i, /\bP\s?\d{2,3}(,\d{3})+/, /\$\s?\d/, /
 const CLAIMS = [/\bguaranteed?\b/i, /\bBIR[- ]approved\b/i, /\b(ISO|SOC ?2|GDPR|HIPAA)[- ](certified|compliant)\b/i, /\bno downtime\b/i, /\bfree of charge\b/i, /\bcheapest\b/i, /\b(netsuite|odoo|quickbooks|xero|microsoft dynamics|oracle)\b.{0,40}\b(bad|worse|terrible|inferior|slow|unreliable)\b/i];
 const ALLOWED_HOSTS = ['dynamiqes.com', 'www.dynamiqes.com', 'maps.app.goo.gl'];
 
-export function filterOutput(text, { systemPrompt = '', visitorContact = '' } = {}) {
+/** Lists keep their first `max` items (each list on its own). */
+export function trimLists(text, max) {
+  let run = 0;
+  return text.split('\n').filter((line) => {
+    if (/^\s*([-*•]|\d+[.)])\s+/.test(line)) return ++run <= max;
+    if (line.trim()) run = 0;
+    return true;
+  }).join('\n');
+}
+/** Over `max` characters: cut at the last complete sentence (or list line) that fits. Never mid-sentence: if no
+ *  sentence ends within the limit, keep the first full sentence even though it is longer. */
+export function cutToSentence(text, max) {
+  if (text.length <= max) return text;
+  const ends = [];
+  const re = /[.!?…](?=["')\]]*(\s|$))|\n/g;
+  for (let m; (m = re.exec(text));) ends.push(m.index + (m[0] === '\n' ? 0 : 1));
+  const fit = ends.filter((i) => i <= max && i > 0);
+  const cut = fit.length ? fit.at(-1) : ends.find((i) => i > 0);
+  return cut ? text.slice(0, cut).trim() : text;
+}
+
+export function filterOutput(text, { systemPrompt = '', visitorContact = '', maxChars = cfg.reply.maxChars, maxListItems = cfg.reply.maxListItems } = {}) {
   const reasons = [];
   if (PRICE.some((re) => re.test(text))) reasons.push('price');
   if (CLAIMS.some((re) => re.test(text))) reasons.push('claim');
@@ -71,7 +92,7 @@ export function filterOutput(text, { systemPrompt = '', visitorContact = '' } = 
   });
   // format: no headings, tables, code fences; keep bullets/links
   out = out.replace(/^#{1,6}\s+/gm, '').replace(/```[\s\S]*?```/g, '').replace(/^\|.*\|\s*$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
-  if (out.length > 1400) out = out.slice(0, 1400).replace(/\s+\S*$/, '') + '…';
+  out = cutToSentence(trimLists(out, maxListItems), maxChars).replace(/\n{3,}/g, '\n\n').trim();
   return { text: out, reasons };
 }
 
