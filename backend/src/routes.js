@@ -12,6 +12,7 @@ import { validateName, validatePhone, validateEmail } from './contact.js';
 import { ingestUrl, sweepSitemap } from './ingest.js';
 import { addMessage, serialize, maskWidgetText } from './log.js';
 import { audit } from './auth.js';
+import { publish, touch, typing } from './events.js';
 
 export const r = Router();
 // real visitor address: Cloudflare's header first (the tunnel / proxy sets it), then X-Forwarded-For, then the socket
@@ -106,7 +107,8 @@ r.post('/session', async (req, res) => {
                      consent_at, consent_version, consent_method, marketing_opt_in, lang, first_page_url, ip_hash, person_key)
                      values($1,$14,$15,$2,$3,$4,$5,$6,$7,$2,$3,$4,now(),$8,$9,$10,$11,$12,$13,$3) returning id`,
     [cleanName, encrypt(ph.value), phoneHash, ph.type, em.value ? encrypt(em.value) : null, emailHash, em.type, consent.version, consent.method || 'chip', !!marketing_opt_in, lang === 'fil' ? 'fil' : 'en', (page_url || '').slice(0, 500), ip, firstName, lastName]);
-  const conv = await q('insert into conversations(visitor_id, lang) values($1,$2) returning id', [v.rows[0].id, lang === 'fil' ? 'fil' : 'en']);
+  const conv = await q('insert into conversations(visitor_id, lang) values($1,$2) returning id, started_at', [v.rows[0].id, lang === 'fil' ? 'fil' : 'en']);
+  publish('conversation.new', { id: conv.rows[0].id, visitor_id: v.rows[0].id, name: cleanName, phone: ph.value, phone_type: ph.type, email: em.value, status: 'open', started_at: conv.rows[0].started_at, lang: lang === 'fil' ? 'fil' : 'en' });
   await hit('ip:' + ip, 'session'); for (const h of [phoneHash, emailHash].filter(Boolean)) await hit('contact:' + h, 'session');
   // what the visitor saw and typed before the session existed (greeting, sign-up), so the dashboard has the whole chat
   if (Array.isArray(transcript)) {
@@ -149,9 +151,21 @@ r.post('/session/resume', auth, async (req, res) => {
   if (resumeBan) return res.status(403).json({ error: 'chat_ended', until: resumeBan });
   const last = (await q(`select id from conversations where visitor_id=$1 and status in ('open','handed_off')
                          and coalesce(last_activity_at, started_at) > now() - make_interval(mins => $2) order by started_at desc limit 1`, [req.session.vid, cfg.resumeWindowMin])).rows[0];
-  const cid = last?.id || (await q('insert into conversations(visitor_id, lang) values($1,$2) returning id', [req.session.vid, req.body?.lang === 'fil' ? 'fil' : 'en'])).rows[0].id;
+  let cid = last?.id;
+  if (!cid) {
+    const c = (await q('insert into conversations(visitor_id, lang) values($1,$2) returning id, started_at', [req.session.vid, req.body?.lang === 'fil' ? 'fil' : 'en'])).rows[0];
+    const v = (await q('select name, phone, phone_type from visitors where id=$1', [req.session.vid])).rows[0];
+    cid = c.id;
+    publish('conversation.new', { id: cid, visitor_id: req.session.vid, name: v?.name, phone: decrypt(v?.phone), phone_type: v?.phone_type, status: 'open', started_at: c.started_at, returning: true });
+  }
   const token = jwt.sign({ vid: req.session.vid, cid, first: req.session.first }, cfg.jwtSecret, { expiresIn: '2h' });
   res.json({ session_id: cid, token, first_name: req.session.first, continued: !!last });
+});
+
+// ---------- typing indicator: start / stop only (never the text), for the live dashboard ----------
+r.post('/typing', auth, (req, res) => {
+  typing(req.session.cid, req.session.first, req.body?.state === 'start' ? 'start' : 'stop');
+  res.status(204).end();
 });
 
 // ---------- widget log: bubbles the browser showed that the server did not produce ----------
@@ -180,6 +194,7 @@ r.post('/chat', auth, async (req, res) => {
   // the visitor closed the page / the widget gave up waiting: stop the AI call and remember the reply was not delivered
   const ac = new AbortController(); let gone = false;
   res.on('close', () => { if (!res.writableEnded) { gone = true; ac.abort(); } });
+  touch(req.session.cid); typing(req.session.cid, req.session.first, 'stop');
   await serialize(req.session.cid, () => chatTurn(req, res, ac, () => gone));
 });
 
@@ -219,6 +234,7 @@ async function chatTurn(req, res, ac, isGone) {
     const n = prior + 1;
     if (n >= cfg.chatStrikesMax) {
       await q(`update conversations set status='ended', ended_at=now(), summary=coalesce(summary, 'Ended by DES: repeated off-topic or abusive messages') where id=$1`, [cid]);
+      publish('conversation.update', { id: cid, status: 'ended' });
       const v = (await q('select phone_hash, email_hash from visitors where id=$1', [vid])).rows[0];
       await banIdentity(banKeys(req, { vid, phoneHash: v?.phone_hash, emailHash: v?.email_hash }));
       const until = await banUntil(banKeys(req, { vid }));
@@ -338,6 +354,8 @@ r.post('/feedback', auth, async (req, res) => {
   if (!['survey', 'thumb', 'thumb_reason'].includes(kind)) return res.status(400).json({ error: 'bad_kind' });
   await q(`insert into feedback(conversation_id, message_id, kind, trigger, rating, thumb, reasons, comment, resolved, dismissed) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [req.session.cid, Number.isInteger(message_id) ? message_id : null, kind, trigger || null, rating ?? null, thumb ?? null, Array.isArray(reasons) ? reasons.slice(0, 5) : null, comment ? maskPII(String(comment)).text.slice(0, 300) : null, resolved || null, !!dismissed]);
+  if (thumb === -1) publish('review.count', {});
+  publish('conversation.update', { id: req.session.cid, feedback: kind });
   res.json({ ok: true });
 });
 r.post('/handoff', auth, async (req, res) => {
@@ -347,7 +365,8 @@ r.post('/handoff', auth, async (req, res) => {
 r.post('/end', auth, async (req, res) => {
   const msgs = (await q(`select role, content from messages where conversation_id=$1 and role in ('user','assistant') order by seq, id`, [req.session.cid])).rows;
   const summary = msgs.length ? await summarize(msgs.map((m) => `${m.role}: ${m.content}`).join('\n')).catch((e) => { console.error('summary failed', e.message); return null; }) : null;
-  await q(`update conversations set ended_at = now(), status = case when status='open' then 'closed' else status end, summary=coalesce($2, summary) where id=$1`, [req.session.cid, summary]);
+  const st = (await q(`update conversations set ended_at = now(), status = case when status='open' then 'closed' else status end, summary=coalesce($2, summary) where id=$1 returning status`, [req.session.cid, summary])).rows[0]?.status;
+  publish('conversation.update', { id: req.session.cid, status: st, summary });
   res.json({ ok: true });
 });
 

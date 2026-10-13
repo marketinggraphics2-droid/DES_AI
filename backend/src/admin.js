@@ -11,6 +11,7 @@ import { answer } from './llm.js';
 import { detectLang, filterOutput, CANNED } from './guardrails.js';
 import { loadSites, toOrigin } from './sites.js';
 import { audit } from './auth.js';
+import { publish, streamHandler } from './events.js';
 
 export const adminRouter = Router();
 const GENERAL = 'General'; // approved answers / questions not tied to one product
@@ -152,7 +153,8 @@ adminRouter.get('/conversations/:id/history', wrap(async (req, res) => {
 adminRouter.put('/leads/:id', wrap(async (req, res) => {
   const status = req.body?.status;
   if (!LEAD_STATUSES.includes(status)) return res.status(400).json({ error: 'bad_status' });
-  await q('update leads set status=$2, updated_at=now() where id=$1', [req.params.id, status]);
+  const l = (await q('update leads set status=$2, updated_at=now() where id=$1 returning conversation_id', [req.params.id, status])).rows[0];
+  if (l) publish('lead.update', { id: req.params.id, conversation_id: l.conversation_id, status });
   res.json({ ok: true });
 }));
 
@@ -220,8 +222,12 @@ adminRouter.post('/golden', wrap(async (req, res) => {
   const row = (await q(`insert into golden_answers(message_id, question, variations, context, ideal_answer, product, reviewed_by, active, embedding)
                         values($1,$2,$3,$4,$5,$6,$7,$8,$9::vector) returning id`,
     [msgId, question, cleanVariations(req.body?.variations), clean(req.body?.context, 2000) || null, ideal, product, req.user?.email || clean(req.body?.reviewed_by, 80) || 'dashboard', req.body?.active !== false, await embedOne(question)])).rows[0];
+  publish('review.count', {});
   res.json({ ok: true, id: Number(row.id) });
 }));
+
+// live updates for the dashboard (events.js): Server-Sent Events, filtered and masked per role
+adminRouter.get('/stream', streamHandler);
 
 adminRouter.put('/golden/:id', wrap(async (req, res) => {
   const cur = (await q('select * from golden_answers where id=$1', [req.params.id])).rows[0];

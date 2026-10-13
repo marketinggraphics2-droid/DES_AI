@@ -4,6 +4,7 @@ import { q } from './db.js';
 import { searchCached, PRODUCTS } from './retrieval.js';
 import { sendHandoff } from './mailer.js';
 import { addMessage } from './log.js';
+import { publish } from './events.js';
 
 export const toolDefs = [
   {
@@ -69,11 +70,13 @@ export async function runTool(name, input, ctx) {
                  team_size = coalesce(excluded.team_size, leads.team_size), current_system = coalesce(excluded.current_system, leads.current_system),
                  updated_at = now()`,
         [visitorId, conversationId, input.need?.slice(0, 300) || null, pi, input.company, input.industry, input.team_size, input.current_system]);
+      publish('lead.update', { conversation_id: conversationId, product_interest: pi, need: input.need?.slice(0, 300) || null });
       return { result: 'Lead saved.', event: { type: 'lead', product_interest: pi } };
     }
     case 'book_demo': {
       await q(`insert into leads(visitor_id, conversation_id, need, demo_requested) values($1,$2,'demo requested',true)
                on conflict (conversation_id) do update set demo_requested = true, updated_at = now()`, [visitorId, conversationId]);
+      publish('lead.update', { conversation_id: conversationId, demo_requested: true });
       const h = await handoff(ctx, `demo requested${input.preferred_time ? ' · ' + input.preferred_time : ''}`);
       return { result: h.already ? 'Demo already requested; Sales notified earlier.' : 'Demo request sent to Sales. Tell the visitor the team will reach them within 24 hours (Mon–Fri) at the contact they gave.', event: { type: 'handoff', reason: 'demo' } };
     }
@@ -103,6 +106,7 @@ export async function handoff(ctx, reason) {
   if (prev.rowCount) return { already: true };
   await q(`insert into handoffs(conversation_id, reason) values($1,$2)`, [conversationId, reason]);
   await q(`update conversations set status='handed_off' where id=$1`, [conversationId]);
+  publish('conversation.update', { id: conversationId, status: 'handed_off', handoff: reason });
   await addMessage(conversationId, { role: 'system', kind: 'event', content: 'Handed to Sales: ' + reason }).catch(() => { });
   try {
     await sendHandoff(conversationId, reason);

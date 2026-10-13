@@ -9,6 +9,7 @@ import { upgradePrompt } from './prompt.js';
 import { accessUser, adminClientIp } from './access.js';
 import { adminAuth, authRouter } from './auth.js';
 import { invalidateSettings } from './settings.js';
+import { closeStreams } from './events.js';
 import { loadSites, isAllowedOrigin, anySitesConfigured } from './sites.js';
 import { pool, exec } from './db.js';
 import fs from 'node:fs';
@@ -89,6 +90,7 @@ async function shutdown(why, code = 0) {
   if (stopping) return; stopping = true;
   try { console.log(`stopping (${why})…`); } catch { /* console may be gone if the runner died */ }
   const force = setTimeout(() => process.exit(1), 10000); force.unref();
+  closeStreams(); // open dashboard streams would keep the server from closing
   server.close();
   try { await pool.end(); } catch (e) { console.error('db close failed:', e.message); }
   process.exit(code);

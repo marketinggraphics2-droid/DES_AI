@@ -3,6 +3,7 @@
 // requests (or logged later by the widget) still read in the order the visitor saw them.
 import { q } from './db.js';
 import { maskPII } from './guardrails.js';
+import { publish, touch } from './events.js';
 
 const COLS = ['role', 'content', 'kind', 'tool_name', 'tool_input', 'tool_output', 'tokens_in', 'tokens_out', 'cache_read', 'cost_usd', 'blocked_reason',
   'product', 'golden_ids', 'incomplete', 'delivered', 'original_content', 'source', 'held'];
@@ -12,9 +13,14 @@ export async function addMessage(conversationId, row) {
   const seq = (await q('update conversations set last_seq = coalesce(last_seq, 0) + 1, last_activity_at = now() where id=$1 returning last_seq', [conversationId])).rows[0]?.last_seq;
   if (seq === undefined) throw new Error('conversation not found');
   const cols = COLS.filter((c) => row[c] !== undefined);
-  const r = await q(`insert into messages(conversation_id, seq, ${cols.join(', ')}) values($1, $2, ${cols.map((_, i) => '$' + (i + 3)).join(', ')}) returning id`,
+  const r = await q(`insert into messages(conversation_id, seq, ${cols.join(', ')}) values($1, $2, ${cols.map((_, i) => '$' + (i + 3)).join(', ')}) returning id, created_at`,
     [conversationId, seq, ...cols.map((c) => row[c])]);
-  return { id: Number(r.rows[0].id), seq };
+  const id = Number(r.rows[0].id);
+  // live dashboard: the new row as the conversation view shows it
+  touch(conversationId);
+  publish('message.new', { conversation_id: conversationId, id, seq, created_at: r.rows[0].created_at, kind: row.kind || 'chat',
+    ...Object.fromEntries(['role', 'content', 'tool_name', 'blocked_reason', 'product', 'golden_ids', 'incomplete', 'delivered', 'original_content', 'source', 'tokens_in', 'tokens_out', 'cost_usd'].map((k) => [k, row[k] ?? null])) });
+  return { id, seq };
 }
 
 /** Update a stored message (final text of a streamed reply, flags). */

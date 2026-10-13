@@ -638,7 +638,7 @@
   // ---------- input ----------
   async function send(raw) {
     const text = (raw ?? input.value).trim(); if (!text || S.busy || S.ended || (S.awaitChoice && raw == null)) return; // typed text waits for the required choice
-    input.value = '';
+    input.value = ''; clearTimeout(typingIdle); typingAt = 0; // sending ends "typing…" (the server clears it on the message)
     if (S.step === 'idle') setLang(isFil(text) ? 'fil' : 'en');
     if (PII.test(text) && S.step === 'done') { addUser(text.replace(PII, '[redacted]')); await addBot("Please don't share card, TIN or ID numbers here — I've hidden it. How else can I help?"); return; }
     if (S.pending) { addUser(text); const p = S.pending; S.pending = null; return p(text); }
@@ -651,6 +651,21 @@
   }
   sendBtn.addEventListener('click', () => send());
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  // live dashboard: "{name} is typing…". Only a start / stop signal goes to the server, never what is typed;
+  // at most one start every 2 s, stop after 5 s without a keystroke or when the box loses focus.
+  let typingAt = 0, typingIdle = null;
+  const typingSignal = (state) => {
+    if (!apiBase || !token || S.step !== 'done') return;
+    fetch(apiBase + '/typing', { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json', 'x-des-device': deviceId, authorization: 'Bearer ' + token }, body: JSON.stringify({ state }) }).catch(() => { });
+  };
+  const typingStop = () => { clearTimeout(typingIdle); if (typingAt) { typingAt = 0; typingSignal('stop'); } };
+  input.addEventListener('input', () => {
+    clearTimeout(typingIdle);
+    if (!input.value.trim()) return typingStop();
+    if (Date.now() - typingAt > 2000) { typingAt = Date.now(); typingSignal('start'); }
+    typingIdle = setTimeout(typingStop, 5000);
+  });
+  input.addEventListener('blur', typingStop);
 
   async function reset(opts = {}) {
     clearOnboardTimer();

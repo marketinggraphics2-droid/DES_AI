@@ -271,3 +271,10 @@ td .muted, .muted { color: var(--ink-3); }
 /* signed-in user in the sidebar */
 .side__user { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; color: var(--side-ink); }
 .side__user b { font-weight: 600; }
+
+/* live updates */
+.live-pill { font-weight: 600; color: var(--good); }
+.live-pill.is-off { color: #E0A200; }
+.live-dot { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 6px; vertical-align: middle; box-shadow: 0 0 0 3px var(--good-bg); }
+tr.is-live .live-dot { display: inline-block; }
+.typing-line { margin-top: 10px; font-size: 12px; color: var(--ink-3); font-style: italic; }

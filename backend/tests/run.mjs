@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import 'dotenv/config';
 import { validateName, validatePhone, validateEmail } from '../src/contact.js';
 import { classify, filterOutput, maskPII, detectLang, cutToSentence, trimLists } from '../src/guardrails.js';
-import { ROOT, ADMIN, PASSWORD, USERS, results, sec, ok, info, guard, sleep, until, testEnv, tempDb, prepareDb, startServer, stopServer, ident, uniqueEmail, uniquePhone, api, loadPage, widget, login, createUser } from './lib.mjs';
+import { ROOT, ADMIN, PASSWORD, USERS, results, sec, ok, info, guard, sleep, until, testEnv, tempDb, prepareDb, startServer, stopServer, ident, uniqueEmail, uniquePhone, api, loadPage, widget, login, createUser, openStream } from './lib.mjs';
 import { adminClientIp } from '../src/access.js';
 
 const PORT = 8790, DEV_PORT = 8791;
@@ -522,6 +522,50 @@ if (want('users')) await guard('users', async () => {
 });
 
 // =====================================================================================
+sec('10d. Live dashboard (Server-Sent Events) and typing indicator');
+if (want('live')) await guard('live', async () => {
+  let r = await openStream(base, null);
+  ok('live stream needs a signed-in user', r.status === 401);
+  const S = await openStream(base, await login(base, 'superuser')), U = await openStream(base, await login(base, 'user'));
+  ok('stream opens and says hello', S.status === 200 && await until(() => S.find('hello'), 5000));
+  const id = ident(); const phone = uniquePhone(); const s = await A.session(id, { phone, name: 'Live Tester' });
+  const cid = s.json.session_id;
+  ok('new chat appears live', await until(() => S.find('conversation.new', (d) => d.id === cid), 5000));
+  const evS = S.find('conversation.new', (d) => d.id === cid), evU = await until(() => U.find('conversation.new', (d) => d.id === cid), 5000) && U.find('conversation.new', (d) => d.id === cid);
+  ok('live events are masked for the User role (phone), full for Superuser', evS.data.phone === '+63' + phone.slice(1) && /•/.test(evU?.data?.phone || '') && evU.data.phone.slice(-4) === phone.slice(-4), `${evS.data.phone} / ${evU?.data?.phone}`);
+  const before = S.events.at(-1)?.id;
+  // typing: start / stop only, throttled
+  r = await A.req('POST', '/api/typing', { token: s.token, id, body: { state: 'start', text: 'secret draft' } });
+  ok('typing signal accepted', r.status === 204);
+  ok('"Live Tester is typing…" reaches the dashboard', await until(() => S.find('typing', (d) => d.conversation_id === cid && d.state === 'start'), 5000));
+  const t = S.find('typing', (d) => d.conversation_id === cid);
+  ok('typing event carries no message text', Object.keys(t.data).sort().join(',') === 'conversation_id,expires_ms,name,state' && t.data.name === 'Live' && !JSON.stringify(t.data).includes('secret'), JSON.stringify(t.data));
+  await A.req('POST', '/api/typing', { token: s.token, id, body: { state: 'start' } });
+  await sleep(400);
+  ok('typing start is throttled (one per 1.5 s)', S.events.filter((e) => e.ev === 'typing' && e.data.conversation_id === cid && e.data.state === 'start').length === 1);
+  ok('chat marked active (live dot)', !!S.find('presence', (d) => d.conversation_id === cid && d.active));
+  // messages
+  await A.chat(s.token, 'our SAP is not working, error on login', id);
+  ok('messages appear live (visitor + DES)', await until(() => S.events.filter((e) => e.ev === 'message.new' && e.data.conversation_id === cid).length >= 2, 8000));
+  ok('sending a message clears "typing…"', !!S.find('typing', (d) => d.conversation_id === cid && d.state === 'stop'));
+  // permissions: the Needs-review count is not sent to the User role
+  const c2 = await A.chat(s.token, 'What is IQ Barcode?', id);
+  await A.req('POST', '/api/feedback', { token: s.token, id, body: { kind: 'thumb', thumb: -1, message_id: c2.done?.message_id } });
+  ok('thumbs-down updates the Needs-review count live', await until(() => S.find('review.count'), 5000));
+  ok('…but the User role (no access to Needs review) never gets it', !U.find('review.count'));
+  // reconnect: replay what was missed
+  S.close(); U.close();
+  const missedFrom = before;
+  await A.chat(s.token, 'our SAP is still down', id);
+  const R = await openStream(base, await login(base, 'superuser'), missedFrom);
+  ok('after a reconnect the missed events are replayed (Last-Event-ID)', await until(() => R.events.filter((e) => e.ev === 'message.new' && e.data.conversation_id === cid && /still down/.test(e.data.content || '')).length === 1, 5000));
+  R.close();
+  const X = await openStream(base, await login(base, 'superuser'), 'oldboot.5');
+  ok('a reconnect after a server restart is told to reload (resync)', await until(() => X.find('resync'), 5000));
+  X.close();
+});
+
+// =====================================================================================
 sec('10b. Access from the internet (through the tunnel)');
 if (want('access')) await guard('access', async () => {
   const pub = { 'cf-connecting-ip': '203.0.113.77' };
@@ -717,6 +761,20 @@ if (want('dashboard')) await guard('dashboard', async () => {
     ok('incomplete and guardrail-replaced replies are flagged', P.$$('.drawer .badge').some((b) => /Cut short/.test(b.textContent)) && !!P.$('.drawer .msg__orig'));
     P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
     sb.value = ''; sb.dispatchEvent(new P.w.Event('input')); await until(() => P.$$('tbody tr.is-click').length > 1, 8000);
+  }
+  if (want('live')) {
+    await go('#/conversations');
+    ok('dashboard shows "Live"', await until(() => /Live/.test(P.$('#livePill')?.textContent || ''), 6000), P.$('#livePill')?.textContent);
+    const lid = ident(); const ls = await A.session(lid, { name: 'Dash Live' });
+    await A.chat(ls.token, 'our SAP is not working, error on login', lid);
+    ok('a new chat appears in the list without reloading, with the live dot', await until(() => P.$(`tr[data-id="${ls.json.session_id}"].is-live`), 8000));
+    P.$(`tr[data-id="${ls.json.session_id}"]`).click(); await until(() => P.$('.drawer .thread'), 8000);
+    await A.req('POST', '/api/typing', { token: ls.token, id: lid, body: { state: 'start' } });
+    ok('open conversation shows "Dash is typing…"', await until(() => !P.$('.drawer .typing-line').hidden && /Dash is typing/.test(P.$('.drawer .typing-line').textContent), 6000));
+    const n0 = P.$$('.drawer .msg').length;
+    await A.chat(ls.token, 'our SAP is still not working since morning', lid);
+    ok('new messages appear in the open conversation', await until(() => P.$$('.drawer .msg').length >= n0 + 2, 8000) && P.$('.drawer .typing-line').hidden);
+    P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
   }
   await go('#/conversations'); P.$('tr.is-click').click(); await until(() => P.$('.drawer .thread'), 8000);
   ok('conversation drawer opens with messages', P.$$('.drawer .msg').length > 0);

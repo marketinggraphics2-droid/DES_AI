@@ -83,6 +83,35 @@
   }
   const fail = (e) => { if (e.message !== 'unauthorized') toast(e.message || 'Something went wrong', true); };
 
+  // ---------------- live updates (Server-Sent Events from /api/admin/stream) ----------------
+  // The browser reconnects by itself and sends Last-Event-ID; the server replays what was missed or says "resync".
+  const live = { es: null, wait: 1000, lastId: '', active: new Set(), page: null, drawer: null };
+  const currentPage = () => location.hash.replace(/^#\/?/, '').split('/')[0] || 'overview';
+  function setLivePill(on) { const p = $('#livePill'); if (p) { p.textContent = on ? '● Live' : 'Reconnecting…'; p.classList.toggle('is-off', !on); } }
+  function dispatch(type, d) { try { live.drawer?.(type, d); } catch (e) { console.error(e); } try { live.page?.(type, d); } catch (e) { console.error(e); } }
+  function disconnectLive() { live.es?.close(); live.es = null; }
+  function connectLive() {
+    disconnectLive();
+    if (typeof EventSource !== 'function') return;
+    const es = new EventSource('/api/admin/stream' + (live.lastId ? '?last_event_id=' + encodeURIComponent(live.lastId) : ''));
+    live.es = es;
+    es.onopen = () => { live.wait = 1000; setLivePill(true); };
+    es.onerror = async () => {
+      setLivePill(false);
+      if (es.readyState !== 2) return; // still CONNECTING: the browser retries on its own
+      // closed for good (signed out, server restarted…): check the sign-in, then reconnect with a growing delay
+      try { await api('/admin/auth/me'); } catch { return; }
+      setTimeout(() => { if (live.es === es) connectLive(); }, live.wait); live.wait = Math.min(30000, live.wait * 2);
+    };
+    const on = (type, fn) => es.addEventListener(type, (e) => { if (e.lastEventId) live.lastId = e.lastEventId; let d = {}; try { d = JSON.parse(e.data); } catch { } fn(d, type); });
+    on('hello', (d) => { live.active = new Set(d.active || []); dispatch('presence', {}); });
+    on('resync', () => { route(); refreshReviewCount(); });
+    on('presence', (d) => { if (d.active) live.active.add(d.conversation_id); else live.active.delete(d.conversation_id); dispatch('presence', d); });
+    on('review.count', () => refreshReviewCount());
+    on('overview.tick', () => { if (currentPage() === 'overview' && !layer.childElementCount) pageOverview({ silent: true }); });
+    for (const t of ['conversation.new', 'conversation.update', 'message.new', 'lead.update', 'typing']) on(t, (d) => dispatch(t, d));
+  }
+
   const BLOCK_LABELS = {
     injection: 'Tried to override the bot’s instructions', off_topic: 'Off-topic question', price: 'Asked for pricing (redirected to demo)',
     abuse: 'Abusive message', support: 'Support request (sent to helpdesk)', too_long: 'Message too long', budget: 'Daily AI budget reached',
@@ -100,6 +129,7 @@
 
   // ---------------- login / shell ----------------
   function showLogin(msg = '') {
+    disconnectLive();
     $('#app').hidden = true; $('#login').hidden = false;
     $('#loginErr').textContent = msg; $('#passwordInput').value = ''; ($('#emailInput').value ? $('#passwordInput') : $('#emailInput')).focus();
   }
@@ -121,7 +151,7 @@
     // menu: only the pages this role may open
     document.querySelectorAll('#nav button[data-perm]').forEach((b) => { b.hidden = !b.dataset.perm.split(' ').some(can); });
     $('#login').hidden = true; $('#app').hidden = false;
-    renderFoot(); refreshReviewCount();
+    renderFoot(); refreshReviewCount(); connectLive();
     if (!location.hash) location.hash = '#/overview'; else route();
   }
   function openPassword() {
@@ -144,6 +174,7 @@
     const s = state.status, foot = $('#sideFoot'); foot.replaceChildren();
     let budget = null; try { budget = (await fetch('/api/health').then((r) => r.json())).budget; } catch { }
     foot.append(
+      h('div', { id: 'livePill', class: 'live-pill' + (live.es?.readyState === 1 ? '' : ' is-off'), text: live.es?.readyState === 1 ? '● Live' : 'Connecting…', title: 'Live updates: new chats, messages and leads appear without reloading' }),
       h('div', null, h('span', { class: 'dot' + (s.mock ? ' is-mock' : '') }), s.mock ? 'Mock mode (no AI key)' : 'Live AI'),
       h('div', { text: s.model }),
       budget ? h('div', { text: `Today: ${usd(budget.spent)} of ${usd(budget.budget)} budget` }) : null,
@@ -167,6 +198,7 @@
     closeLayer();
     const pages = { overview: pageOverview, conversations: pageConversations, leads: pageLeads, finetune: pageFinetune, review: pageReview, kb: pageKb, settings: pageSettings, users: pageUsers, audit: pageAudit };
     const btn = document.querySelector(`#nav button[data-page="${page}"]`);
+    live.page = null; // the page sets its own live handler
     if (!pages[page] || !btn || btn.hidden) return pageOverview(); // not this role's page
     pages[page](arg);
     main.focus({ preventScroll: true }); window.scrollTo(0, 0);
@@ -268,8 +300,8 @@
   }
 
   // ---------------- overview ----------------
-  async function pageOverview() {
-    loading();
+  async function pageOverview(opts) {
+    if (!opts?.silent) loading();
     let o, act;
     try { [o, act] = await Promise.all([api('/admin/overview?days=' + state.days), api('/admin/activity?limit=30')]); } catch (e) { return fail(e); }
     const k = o.kpi;
@@ -338,8 +370,8 @@
       let rows, total; try { const r = await api('/admin/conversations?' + qs, { raw: true }); total = Number(r.headers.get('x-total-count')) || 0; rows = await r.json(); } catch (e) { return fail(e); }
       tbody.replaceChildren();
       if (!rows.length) tbody.append(h('tr', null, h('td', { colspan: 7 }, empty('No conversations found', 'Try another filter.'))));
-      rows.forEach((c) => tbody.append(h('tr', { class: 'is-click', tabindex: '0', on: { click: () => openConversation(c.id), keydown: (e) => { if (e.key === 'Enter') openConversation(c.id); } } },
-        h('td', { class: 'muted', text: when(c.started_at), style: { whiteSpace: 'nowrap' } }),
+      rows.forEach((c) => tbody.append(h('tr', { class: 'is-click' + (live.active.has(c.id) ? ' is-live' : ''), 'data-id': c.id, tabindex: '0', on: { click: () => openConversation(c.id), keydown: (e) => { if (e.key === 'Enter') openConversation(c.id); } } },
+        h('td', { class: 'muted', style: { whiteSpace: 'nowrap' } }, h('span', { class: 'live-dot', title: 'Active now', 'aria-label': 'Active now' }), when(c.started_at)),
         h('td', null, h('div', { text: c.name, style: { fontWeight: 600 } }), contactLines(c)),
         h('td', null, h('div', { class: 'clip', text: c.first_question || '—', title: c.first_question || '' }), c.summary ? h('div', { class: 'muted clip', text: c.summary }) : null),
         h('td', null, h('div', { class: 'badges' }, (c.products || []).map((p) => badge(p)))),
@@ -350,6 +382,12 @@
         h('td', null, statusBadge(c.status)))));
       pagerBox.replaceChildren(...[pager(total, page, SIZE, (x) => load(x, true))].filter(Boolean));
       if (scroll) main.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    };
+    // live: new chats / messages / status changes refresh this page in place; the dot marks chats active right now
+    const reload = debounce(() => load(filters.page), 700);
+    live.page = (type) => {
+      if (type === 'presence') tbody.querySelectorAll('tr[data-id]').forEach((tr) => tr.classList.toggle('is-live', live.active.has(tr.dataset.id)));
+      else if (['conversation.new', 'conversation.update', 'message.new'].includes(type)) reload();
     };
     search.addEventListener('input', debounce(() => { filters.q = search.value.trim(); load(1); }));
     status.addEventListener('change', () => { filters.status = status.value; load(1); });
@@ -427,6 +465,22 @@
         }));
     }
     if (!c.messages.length) thread.append(empty('No messages', 'The visitor opened the chat but did not send anything.'));
+    // live: messages appear as they are sent; "{name} is typing…" while the visitor types (start / stop only, never the text)
+    const typingEl = h('div', { class: 'typing-line', hidden: true, 'aria-live': 'polite' });
+    let typingTimer = null;
+    live.drawer = (type, d) => {
+      if ((d.conversation_id || d.id) !== id) return;
+      if (type === 'message.new') {
+        thread.querySelector(':scope > .empty')?.remove();
+        thread.append(...renderThread([d], { goldenById, thumbs, reasons, canSave: false }).childNodes);
+        if (d.role === 'user') typingEl.hidden = true;
+      } else if (type === 'typing') {
+        clearTimeout(typingTimer);
+        typingEl.textContent = `${d.name || 'The visitor'} is typing…`;
+        typingEl.hidden = d.state !== 'start';
+        if (d.state === 'start') typingTimer = setTimeout(() => { typingEl.hidden = true; }, d.expires_ms || 6000);
+      }
+    };
     const lead = c.lead;
     body.replaceChildren(
       h('section', { class: 'card', style: { marginBottom: '16px' } }, h('div', { class: 'card__body' }, h('dl', { class: 'kv' },
@@ -441,6 +495,7 @@
       ))),
       tabs.children.length ? tabs : null,
       panel,
+      typingEl,
       !can('visitors.delete') ? null : h('div', { style: { marginTop: '28px', paddingTop: '14px', borderTop: '1px solid var(--line)' } },
         h('button', { class: 'btn btn--danger btn--sm', type: 'button', text: 'Delete this visitor’s data', on: { click: async () => {
           if (!confirm(`Permanently delete ${c.name}'s details, chats and lead? Use this for Data Privacy Act erasure requests. This cannot be undone.`)) return;
@@ -450,9 +505,12 @@
   }
 
   // ---------------- leads ----------------
-  async function pageLeads() {
-    loading();
+  async function pageLeads(opts) {
+    if (!opts?.silent) loading();
     let rows; try { rows = await api('/admin/leads'); } catch (e) { return fail(e); }
+    if (currentPage() !== 'leads') return;
+    const again = debounce(() => { if (currentPage() === 'leads' && !layer.childElementCount) pageLeads({ silent: true }); }, 1000);
+    live.page = (type) => { if (type === 'lead.update') again(); };
     const dl = !can('leads.export') ? null : h('button', { class: 'btn', type: 'button', text: 'Download CSV', on: { click: async () => {
       try { const r = await api('/admin/export/leads.csv', { raw: true }); const url = URL.createObjectURL(await r.blob()); const a = h('a', { href: url, download: `des-leads-${new Date().toISOString().slice(0, 10)}.csv` }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); } catch (e) { fail(e); }
     } } });
@@ -918,6 +976,7 @@
     if (!isModal) node.querySelector('button')?.focus();
   }
   function closeLayer() {
+    live.drawer = null;
     if (!layer.childElementCount) return;
     layer.replaceChildren(); document.body.style.overflow = '';
     lastFocus?.focus?.({ preventScroll: true });

@@ -115,6 +115,29 @@ export function api(base) {
   return { req, chat, person, session };
 }
 
+// ---------------- live dashboard stream ----------------
+/** Reads GET /api/admin/stream; events land in .events as {ev, id, data}. */
+export async function openStream(base, cookie, lastEventId) {
+  const ac = new AbortController(); const events = [];
+  const r = await fetch(base + '/api/admin/stream', { headers: { ...(cookie ? { cookie } : {}), ...(lastEventId ? { 'last-event-id': lastEventId } : {}) }, signal: ac.signal });
+  if (r.ok) (async () => {
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+    try {
+      for (;;) {
+        const { value, done } = await rd.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i; while ((i = buf.indexOf('\n\n')) >= 0) {
+          const blk = buf.slice(0, i); buf = buf.slice(i + 2);
+          const ev = blk.match(/^event: (.*)$/m)?.[1]; if (!ev) continue;
+          const d = blk.match(/^data: (.*)$/m)?.[1];
+          events.push({ ev, id: blk.match(/^id: (.*)$/m)?.[1] || null, data: d ? JSON.parse(d) : null });
+        }
+      }
+    } catch { /* aborted */ }
+  })();
+  return { status: r.status, events, close: () => ac.abort(), find: (ev, pred = () => true) => events.find((e) => e.ev === ev && pred(e.data || {})) };
+}
+
 // ---------------- jsdom (widget / dashboard) ----------------
 /** jsdom's AbortSignal is not Node's: Node's fetch rejects it, so mirror it onto a Node one. */
 function nodeSignal(s) {
@@ -141,6 +164,35 @@ export async function loadPage(base, pagePath, { id, cfg = '', storage = {}, bef
         return r;
       };
       w.__jar = jar;
+      // jsdom has no EventSource: a small one on Node's fetch (same cookie), enough for the dashboard's live updates
+      const streams = (w.__streams = []);
+      const safe = (fn, e) => { try { fn?.(e); } catch { /* page already closed */ } };
+      w.EventSource = class {
+        constructor(url) {
+          this.readyState = 0; this.listeners = {}; this.ac = new AbortController(); streams.push(this);
+          (async () => {
+            try {
+              const r = await fetch(new URL(url, base), { headers: jar.cookie ? { cookie: jar.cookie } : {}, signal: this.ac.signal });
+              if (!r.ok) { this.readyState = 2; if (!this.closed) safe(this.onerror, {}); return; }
+              this.readyState = 1; safe(this.onopen, {});
+              const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+              for (;;) {
+                const { value, done } = await rd.read(); if (done) break;
+                buf += dec.decode(value, { stream: true });
+                let i; while ((i = buf.indexOf('\n\n')) >= 0) {
+                  const blk = buf.slice(0, i); buf = buf.slice(i + 2);
+                  const type = blk.match(/^event: (.*)$/m)?.[1]; if (!type) continue;
+                  const e = { type, data: blk.match(/^data: (.*)$/m)?.[1] || '', lastEventId: blk.match(/^id: (.*)$/m)?.[1] || '' };
+                  if (!this.closed) (this.listeners[type] || []).forEach((fn) => safe(fn, e));
+                }
+              }
+            } catch { /* closed */ }
+            if (this.readyState !== 2) { this.readyState = 2; if (!this.closed) safe(this.onerror, {}); }
+          })();
+        }
+        addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); }
+        close() { this.closed = true; this.readyState = 2; this.ac.abort(); }
+      };
       w.TextDecoder = TextDecoder; w.TextEncoder = TextEncoder;
       w.ResizeObserver = class { observe() { } disconnect() { } };
       w.scrollTo = () => { }; w.Element.prototype.scrollTo = () => { }; w.HTMLElement.prototype.scrollIntoView = () => { };
@@ -153,7 +205,7 @@ export async function loadPage(base, pagePath, { id, cfg = '', storage = {}, bef
   });
   const w = dom.window, d = w.document;
   w.addEventListener('error', (e) => errors.push('window: ' + (e.error?.stack || e.message)));
-  return { dom, w, d, errors, $: (s) => d.querySelector(s), $$: (s) => [...d.querySelectorAll(s)], close: () => w.close() };
+  return { dom, w, d, errors, $: (s) => d.querySelector(s), $$: (s) => [...d.querySelectorAll(s)], close: () => { (w.__streams || []).forEach((s) => s.close()); w.close(); } };
 }
 
 /** Widget driver: open the chat, type, tap chips, read bot bubbles. */
