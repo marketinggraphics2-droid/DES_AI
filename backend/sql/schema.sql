@@ -126,8 +126,7 @@ insert into facts(key,value) values
  ('hr_mobile','+63 917 703 2701'),
  ('hours','Monday–Friday, 8:00 AM – 5:00 PM (Philippine time)'),
  ('partner_tier','SAP Premier Partner'),
- ('demo_url','https://dynamiqes.com/book-free-demo/'),
- ('dpo_email','dpo@dynamiqes.com')
+ ('demo_url','https://dynamiqes.com/book-free-demo/')
 on conflict (key) do nothing;
 
 create table if not exists glossary (
