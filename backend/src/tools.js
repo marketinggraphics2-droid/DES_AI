@@ -1,7 +1,7 @@
 // Tools the model may call. Strict JSON schemas; the server validates and owns all side effects.
 // Contact details never come from the model — they come from the onboarding record.
 import { q } from './db.js';
-import { search } from './retrieval.js';
+import { searchCached, PRODUCTS } from './retrieval.js';
 import { sendHandoff } from './mailer.js';
 import { addMessage } from './log.js';
 
@@ -38,9 +38,13 @@ export const toolDefs = [
   },
   {
     name: 'search_kb',
-    description: 'Search dynamiqes.com content when the supplied reference material does not cover the question.',
+    description: 'Search the content of dynamiqes.com. Call it BEFORE answering any question about what a DynamIQ product or service does, its features, modules, integrations, BIR / tax compliance, implementation, cloud or on-premise setup, industries served, clients, events or company details. '
+      + 'Write a short keyword query in English (translate Filipino). Set product when the question is about one product, otherwise null. Do not call it for greetings, thanks or small talk. Results repeated within this chat are instant.',
     strict: true,
-    input_schema: { type: 'object', properties: { query: { type: 'string', maxLength: 200 } }, required: ['query'], additionalProperties: false },
+    input_schema: { type: 'object', properties: {
+      query: { type: 'string', maxLength: 200, description: 'Short keyword query, e.g. "IQ People 13th month pay computation"' },
+      product: { type: ['string', 'null'], enum: [...PRODUCTS, null], description: 'Limit to one product, or null' },
+    }, required: ['query', 'product'], additionalProperties: false },
   },
   {
     name: 'get_open_jobs',
@@ -78,8 +82,11 @@ export async function runTool(name, input, ctx) {
       return { result: h.already ? 'Already handed off to Sales in this conversation.' : 'Handed off. Tell the visitor a consultant will reach them within 24 hours (Mon–Fri) and give the direct contact.', event: { type: 'handoff', reason: input.reason } };
     }
     case 'search_kb': {
-      const rows = await search(input.query, { k: 4 });
-      return { result: rows.length ? rows.map((r) => `<doc url="${r.url}" title="${r.title}">\n${r.chunk}\n</doc>`).join('\n') : 'No matching content on dynamiqes.com.' };
+      const product = PRODUCTS.includes(input.product) ? input.product : null;
+      const { rows, cached } = await searchCached(ctx.conversationId, String(input.query || '').slice(0, 200), { k: 4, product });
+      (ctx.sources ||= []).push(...rows);
+      ctx.searches = (ctx.searches || 0) + 1; if (cached) ctx.cachedSearches = (ctx.cachedSearches || 0) + 1;
+      return { result: rows.length ? rows.map((r) => `<doc url="${r.url}" title="${(r.title || '').replace(/"/g, "'")}"${r.section ? ` section="${r.section.replace(/"/g, "'")}"` : ''}>\n${r.chunk}\n</doc>`).join('\n') : 'No matching content on dynamiqes.com. Do not guess: offer a consultant.' };
     }
     case 'get_open_jobs': {
       const r = await q(`select title, url from kb_documents where kind='career' and status='active' order by title`);

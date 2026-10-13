@@ -17,7 +17,8 @@
     "db:restore": "node scripts/restore-db.js",
     "bg": "node scripts/bg.js",
     "stop": "node scripts/stop.js",
-    "test": "node tests/run.mjs"
+    "test": "node tests/run.mjs",
+    "eval": "node scripts/eval-retrieval.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.0",

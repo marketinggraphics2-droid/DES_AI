@@ -17,7 +17,7 @@ const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'closed'];
 
 // conversations of the same person as visitor $2: same visitor row, same phone (person_key), or same email on another sign-up
 const SAME_PERSON = `(c.visitor_id = $2 or exists (select 1 from visitors me where me.id = $2 and ((me.person_key is not null and v.person_key = me.person_key) or (me.email_hash is not null and v.email_hash = me.email_hash))))`;
-const MSG_COLS = 'id, seq, role, kind, source, content, original_content, incomplete, delivered, tool_name, tool_input, blocked_reason, product, golden_ids, tokens_in, tokens_out, created_at';
+const MSG_COLS = 'id, seq, role, kind, source, content, original_content, incomplete, delivered, tool_name, tool_input, blocked_reason, product, golden_ids, tokens_in, tokens_out, cost_usd, created_at';
 adminRouter.use((req, res, next) => {
   const tok = (req.headers.authorization || '').replace(/^Bearer /, '');
   if (cfg.adminToken && tok === cfg.adminToken) return next();

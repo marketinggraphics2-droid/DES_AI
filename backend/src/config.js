@@ -46,6 +46,10 @@ export const cfg = {
   },
   // a returning visitor within this many minutes continues the same conversation instead of starting a new one
   resumeWindowMin: num(process.env.RESUME_WINDOW_MIN, 30),
+  // auto (default): the 6 best website sections are attached to each question (not to greetings / thanks).
+  // tool: the AI searches (search_kb) only when it needs to. Measured 2026-10-13 (docs/eval/retrieval-wave2.md): tool mode
+  // cost +57 % and answered worse, because every search re-sends the whole prompt and IQGateway has no prompt caching.
+  retrievalMode: process.env.RETRIEVAL_MODE === 'tool' ? 'tool' : 'auto',
   testHooks: process.env.DES_TEST_HOOKS === '1', // test suite only: lets a request simulate an AI failure or a price in the reply
   dailyBudgetUsd: num(process.env.DAILY_BUDGET_USD, 20),
   // Fallback $/1M tokens for the cost meter, used only when IQGateway's x_gateway cost is missing

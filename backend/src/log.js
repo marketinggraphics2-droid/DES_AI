@@ -4,7 +4,7 @@
 import { q } from './db.js';
 import { maskPII } from './guardrails.js';
 
-const COLS = ['role', 'content', 'kind', 'tool_name', 'tool_input', 'tool_output', 'tokens_in', 'tokens_out', 'cache_read', 'blocked_reason',
+const COLS = ['role', 'content', 'kind', 'tool_name', 'tool_input', 'tool_output', 'tokens_in', 'tokens_out', 'cache_read', 'cost_usd', 'blocked_reason',
   'product', 'golden_ids', 'incomplete', 'delivered', 'original_content', 'source', 'held'];
 
 /** Insert one message with the next sequence number. Returns {id, seq}. */

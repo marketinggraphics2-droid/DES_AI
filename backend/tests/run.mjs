@@ -361,6 +361,35 @@ if (want('length')) await guard('length', async () => {
 });
 
 // =====================================================================================
+sec('9d. Website search (auto mode default; on-demand "tool" mode on its own test backend)');
+if (want('retrieval')) await guard('retrieval', async () => {
+  let id = ident(), s = await A.session(id);
+  let c = await A.chat(s.token, 'Hi', id);
+  ok('auto mode: a greeting gets no website sections', !!c.done && (c.done.sources || []).length === 0, JSON.stringify(c.done?.sources));
+  c = await A.chat(s.token, 'What is IQ Barcode?', id);
+  ok('auto mode: a product question gets website sections', (c.done?.sources || []).length > 0);
+  const det = (await A.req('GET', `/api/admin/conversations/${s.json.session_id}/detail`, { admin: true })).json;
+  ok('cost per reply recorded (from IQGateway)', det.messages.filter((m) => m.role === 'assistant' && m.kind === 'chat').every((m) => Number(m.cost_usd) > 0 && m.tokens_in > 0), det.messages.filter((m) => m.role === 'assistant').map((m) => m.cost_usd + '/' + m.tokens_in).join(' '));
+  // on-demand mode
+  const tEnv = testEnv(8796, tempDb(), { RETRIEVAL_MODE: 'tool' }); prepareDb(tEnv);
+  const T = await startServer(tEnv); const B = api(T.base);
+  try {
+    id = ident(); s = await B.session(id);
+    c = await B.chat(s.token, 'Hi', id);
+    ok('tool mode: greeting answered without searching', !!c.done && c.done.searches === 0 && (c.done.sources || []).length === 0, `searches=${c.done?.searches}`);
+    c = await B.chat(s.token, 'Does IQ People compute 13th month pay?', id);
+    ok('tool mode: product question is always grounded in a search', c.done?.searches >= 1 && (c.done.sources || []).length > 0, `searches=${c.done?.searches}`);
+    ok('tool mode: the answer comes from the search (13th month)', /13th/i.test(c.done?.text || ''), c.done?.text);
+    const d2 = (await B.req('GET', `/api/admin/conversations/${s.json.session_id}/detail`, { admin: true })).json;
+    ok('tool mode: the search is logged in the conversation', d2.messages.some((m) => m.role === 'tool' && m.tool_name === 'search_kb'));
+    c = await B.chat(s.token, 'Can you connect Shopee or Lazada orders to SAP?', id);
+    ok('tool mode: never an empty reply, even after several searches', (c.done?.text || '').trim().length > 20, `searches=${c.done?.searches}`);
+    c = await B.chat(s.token, 'Does IQ People compute 13th month pay?', id);
+    info('tool mode: repeated question reuses the cached search', `searches=${c.done?.searches}`);
+  } finally { await stopServer(T.base, T.proc); }
+});
+
+// =====================================================================================
 sec('10. Admin API');
 if (want('admin')) await guard('admin', async () => {
   for (const p of ['/api/admin/overview', '/api/admin/leads', '/api/admin/golden']) ok(`${p} needs the admin token`, (await A.req('GET', p)).status === 401);
@@ -533,7 +562,7 @@ if (want('widget')) await guard('widget', async () => {
   const masked = '0' + rp.slice(1, 4) + '•••' + rp.slice(-4);
   ok('returning visitor: "Continue as Rina Cruz · 09xx•••xxxx?" instead of sign-up', await until(() => W.bots().some((b) => b.includes('Continue as Rina Cruz') && b.includes(masked)), 6000) && W.input.disabled, W.bots().join(' | ').slice(-160));
   await W.chip(/Yes, that.s me/); r = await W.say('What is IQ Barcode?');
-  ok('"Yes, that\'s me" → straight to the AI, no consent / name / number again', !W.bots().some((b) => /formality|full name|mobile number/i.test(b)) && /barcode|scan/i.test(r), r);
+  ok('"Yes, that\'s me" → straight to the AI, no consent / name / number again', !W.bots().some((b) => /formality|full name|mobile number/i.test(b)) && /barcode|scan/i.test(r), r + ' ev=' + W.w.DES.data.events.filter((e) => /error/.test(e.type)).map((e) => e.message).join(','));
   W.close();
   W = await widget(base, { id: rid, storage: keep }); await W.open();
   await until(() => W.bots().some((b) => /Continue as/.test(b)), 6000); await W.chip(/Not me/);
@@ -638,5 +667,9 @@ console.log('\n================ SUMMARY ================');
 const bySec = {}; for (const r of results) { bySec[r.section] ||= { pass: 0, fail: 0, info: 0 }; bySec[r.section][r.status]++; }
 for (const [s, c] of Object.entries(bySec)) console.log(`${c.fail ? 'FAIL' : 'ok  '}  ${s.padEnd(48)} ${c.pass} passed${c.fail ? `, ${c.fail} failed` : ''}${c.info ? `, ${c.info} info` : ''}`);
 console.log(`\n${pass} passed, ${fail.length} failed, ${inf} info · ${Math.round((Date.now() - t0) / 1000)} s`);
-if (fail.length) { console.log('\nFailures:'); for (const f of fail) console.log(`- [${f.section}] ${f.label}${f.extra ? ' — ' + String(f.extra).slice(0, 200) : ''}`); }
+if (fail.length) {
+  console.log('\nFailures:'); for (const f of fail) console.log(`- [${f.section}] ${f.label}${f.extra ? ' — ' + String(f.extra).slice(0, 200) : ''}`);
+  const errs = (server.proc.log || '').split('\n').filter((l) => /error|failed|Gateway|timeout/i.test(l)).slice(-15);
+  if (errs.length) console.log('\nTest backend errors (last 15):\n' + errs.map((l) => '  ' + l.slice(0, 300)).join('\n'));
+}
 process.exit(fail.length ? 1 : 0);

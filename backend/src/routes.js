@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { cfg, isMock } from './config.js';
 import { q, encrypt, decrypt, hmac, hit, count, isBlocked, budgetState } from './db.js';
-import { search, glossaryHits, facts, detectProduct, goldenMatches, productNotes } from './retrieval.js';
+import { search, glossaryHits, facts, detectProduct, goldenMatches, productNotes, needsKb, isSmallTalk, foundEarlier } from './retrieval.js';
 import { stablePrompt, buildContext, invalidatePrompt } from './prompt.js';
 import { answer, summarize, classifyLLM } from './llm.js';
 import { maskPII, injectionScore, classify, detectLang, filterOutput, CANNED, MAX_INPUT_CHARS } from './guardrails.js';
@@ -275,9 +275,14 @@ async function chatTurn(req, res, ac, isGone) {
     const budget = await budgetState();
     if (budget.ratio >= 1) { await handoff({ conversationId: cid, visitorId: vid }, 'budget exhausted'); send('text', { delta: C.budget }); return finish(C.budget, { blocked: 'budget', lang }); }
 
-    // retrieval
-    const [chunks, gl, f, system, approved, notes] = await Promise.all([search(masked, { k: 6, product }), glossaryHits(masked), facts(), stablePrompt(), goldenMatches(masked, { product }), productNotes(product)]);
-    const context = buildContext({ facts: f, chunks, glossary: gl, lang, visitorName: first, approved, product, notes });
+    // retrieval: "auto" attaches the 6 best website sections to every message; "tool" lets the AI search only when needed
+    // (mock mode has no tool loop, so it keeps auto)
+    const auto = cfg.retrievalMode === 'auto' || isMock();
+    const smallTalk = isSmallTalk(masked);
+    const [chunks, gl, f, system, approved, notes] = await Promise.all([auto && !smallTalk ? search(masked, { k: 6, product }) : (auto ? [] : null), glossaryHits(masked), facts(), stablePrompt(), smallTalk ? [] : goldenMatches(masked, { product }), productNotes(product)]);
+    const context = buildContext({ facts: f, chunks, glossary: gl, lang, visitorName: first, approved, product, notes, found: auto ? [] : foundEarlier(cid) });
+    // a product / capability question with no approved answer must be grounded in a website search
+    const requireSearch = !auto && !approved.length && needsKb(masked, product);
     if (approved.length) await q('update golden_answers set use_count = use_count + 1, last_used_at = now() where id = any($1::bigint[])', [approved.map((a) => a.id)]);
     const userTurn = `${context}\n<message>\n${masked}${piiHits ? '\n(Note: the visitor pasted sensitive numbers which were redacted; remind them gently not to share those here.)' : ''}\n</message>`;
 
@@ -286,14 +291,14 @@ async function chatTurn(req, res, ac, isGone) {
                            and not coalesce(incomplete, false) and id <> $2 order by seq desc, id desc limit 20`, [cid, userRowId])).rows.reverse();
     const history = hist.map((m) => ({ role: m.role, content: m.content }));
 
-    const ctx = { conversationId: cid, visitorId: vid };
+    const ctx = { conversationId: cid, visitorId: vid, sources: [] };
     const onText = (d) => {
       streamed += d; send('text', { delta: d });
       if (hooks.fail === 'midstream' && streamed.length > 20) throw new Error('test hook: failure mid-reply');
     };
     const onTool = (t) => addMessage(cid, { role: 'tool', content: t.output?.slice(0, 2000) || '', tool_name: t.name, tool_input: t.input || null, tool_output: { result: t.output?.slice(0, 2000) } });
     let out;
-    try { out = await answer({ system, history, userTurn, ctx, onText, onEvent: (ev) => send('event', ev), onTool, signal: ac.signal }); }
+    try { out = await answer({ system, history, userTurn, ctx, onText, onEvent: (ev) => send('event', ev), onTool, signal: ac.signal, requireSearch, noTools: smallTalk }); }
     finally { if (!out) ac.abort(); } // stop reading the gateway stream after an error
     if (isGone()) throw Object.assign(new Error('visitor left'), { code: 'visitor_left' });
     if (hooks.append) { out.text += hooks.append; streamed += hooks.append; send('text', { delta: hooks.append }); }
@@ -306,10 +311,12 @@ async function chatTurn(req, res, ac, isGone) {
     else if (reasons.length) { text = C.trouble; blocked = reasons.join(','); }
     if (blocked || text !== streamed) send('replace', { text });
 
-    const m = await addMessage(cid, { role: 'assistant', content: prefix + text, original_content: text !== out.text ? out.text : null, tokens_in: out.usage.in, tokens_out: out.usage.out, cache_read: out.usage.cache,
+    const m = await addMessage(cid, { role: 'assistant', content: prefix + text, original_content: text !== out.text ? out.text : null, tokens_in: out.usage.in, tokens_out: out.usage.out, cache_read: out.usage.cache, cost_usd: out.usd,
       blocked_reason: blocked, product, golden_ids: approved.length ? approved.map((a) => a.id) : null, delivered: !isGone() });
     saved = true;
-    send('done', { text, blocked, lang, message_id: m.id, sources: chunks.slice(0, 3).map((c) => ({ title: c.title, url: c.url })) });
+    const used = [...(chunks || []), ...ctx.sources];
+    const sources = [...new Map(used.map((c) => [c.url, { title: c.title, url: c.url }])).values()].slice(0, 3);
+    send('done', { text, blocked, lang, message_id: m.id, sources, searches: ctx.searches || 0 });
     res.end();
   } catch (e) {
     // keep whatever part of the reply the visitor already saw (or would have seen), marked as cut short

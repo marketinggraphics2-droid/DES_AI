@@ -32,8 +32,23 @@ async function voyageEmbed(texts, inputType) {
   return j.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
 }
 
+// query embeddings are cached (follow-ups, repeated questions, approved-answer matching embed the same text again)
+const queryCache = new Map();
+const QUERY_CACHE_MAX = 1000;
+
 /** @param {string[]} texts  @param {'document'|'query'} inputType */
 export async function embed(texts, inputType = 'document') {
+  if (inputType === 'query' && texts.length === 1) {
+    const key = cfg.embeddings.provider + ':' + texts[0].trim().toLowerCase();
+    if (queryCache.has(key)) { const v = queryCache.get(key); queryCache.delete(key); queryCache.set(key, v); return [v]; }
+    const [v] = await embedUncached(texts, inputType);
+    queryCache.set(key, v);
+    if (queryCache.size > QUERY_CACHE_MAX) queryCache.delete(queryCache.keys().next().value);
+    return [v];
+  }
+  return embedUncached(texts, inputType);
+}
+async function embedUncached(texts, inputType) {
   if (cfg.embeddings.provider === 'voyage' && cfg.embeddings.voyageKey) {
     const out = [];
     for (let i = 0; i < texts.length; i += 64) out.push(...(await voyageEmbed(texts.slice(i, i + 64), inputType)));

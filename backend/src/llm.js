@@ -26,6 +26,8 @@ function geminiSchema(s) {
       if (v.includes('null')) out.nullable = true;
     } else if (k === 'properties') {
       out.properties = Object.fromEntries(Object.entries(v).map(([pk, pv]) => [pk, geminiSchema(pv)]));
+    } else if (k === 'enum') {
+      out.enum = v.filter((x) => x !== null); // Gemini enums are strings only; nullable covers null
     } else if (k === 'items') {
       out.items = geminiSchema(v);
     } else out[k] = v;
@@ -54,7 +56,7 @@ export class GatewayError extends Error {
 const isClaude = (model) => /^claude-/i.test(model);
 
 /** Request body shared by every call. Claude models get effort + a cached system block via provider_options. */
-function buildBody({ model, system, messages, maxTokens, stream, withTools }) {
+function buildBody({ model, system, messages, maxTokens, stream, withTools, toolChoice }) {
   const body = {
     model,
     messages: [{ role: 'system', content: system }, ...messages],
@@ -63,6 +65,7 @@ function buildBody({ model, system, messages, maxTokens, stream, withTools }) {
   };
   if (stream) body.stream_options = { include_usage: true };
   if (withTools) body.tools = toolsFor(model);
+  if (withTools && toolChoice) body.tool_choice = toolChoice;
   if (cfg.gateway.provider) body.provider = cfg.gateway.provider;
   if (isClaude(model)) {
     const po = {};
@@ -110,13 +113,13 @@ const readUsage = (u) => ({
 async function streamOnce(body, onText, signal) {
   const res = await post(body, signal);
   const dec = new TextDecoder();
-  let buf = '', text = '', finish = null, usage = { in: 0, out: 0, cache: 0 }, usd = null;
+  let buf = '', text = '', finish = null, usage = { in: 0, out: 0, cache: 0 }, usd = null, credits = null;
   const calls = [];
   const handle = (data) => {
     if (!data || data === '[DONE]') return;
     let j; try { j = JSON.parse(data); } catch { return; }
     if (j.error) throw new GatewayError(502, JSON.stringify(j.error));
-    if (j.x_gateway) { const c = gatewayUsd(j.x_gateway); if (c !== null) usd = c; }
+    if (j.x_gateway) { const c = gatewayUsd(j.x_gateway); if (c !== null) usd = c; if (typeof j.x_gateway.creditsCharged === 'number') credits = j.x_gateway.creditsCharged; }
     if (j.usage) usage = readUsage(j.usage);
     const ch = j.choices?.[0];
     if (!ch) return;
@@ -141,6 +144,13 @@ async function streamOnce(body, onText, signal) {
   }
   if (buf.trim().startsWith('data:')) handle(buf.trim().slice(5).trim());
   calls.forEach((c, i) => { if (c && !c.id) c.id = `call_${i}`; });
+  // IQGateway streams send no token usage, only credits (1 credit = 10,000 tokens). Estimate: output ≈ 4 characters
+  // per token, input = the rest. Close enough for the dashboard and budget meter; cost (usd) is exact.
+  if (!usage.in && !usage.out && credits) {
+    const total = Math.round(credits * 10000);
+    const outChars = text.length + calls.filter(Boolean).reduce((a, c) => a + c.name.length + c.arguments.length, 0);
+    usage.out = Math.min(total, Math.ceil(outChars / 4)); usage.in = total - usage.out;
+  }
   return { text, toolCalls: calls.filter(Boolean), finish, usage, usd };
 }
 
@@ -165,7 +175,9 @@ async function complete({ model, system, user, maxTokens }) {
  * @param {AbortSignal} [p.signal]     aborts the gateway call (visitor disconnected)
  * @returns {Promise<{text:string, usage:{in:number,out:number,cache:number}, toolCalls:Array}>}
  */
-export async function answer({ system, history, userTurn, ctx, onText, onEvent, onTool, signal, dry = false }) {
+/** requireSearch: the first round must call search_kb (product / capability question, no approved answer).
+ *  noTools: small talk, the model may not call tools. */
+export async function answer({ system, history, userTurn, ctx, onText, onEvent, onTool, signal, dry = false, requireSearch = false, noTools = false }) {
   if (isMock()) return mockAnswer({ userTurn, ctx, onText, onEvent, onTool, dry });
 
   const messages = [...history, { role: 'user', content: userTurn }];
@@ -175,8 +187,12 @@ export async function answer({ system, history, userTurn, ctx, onText, onEvent, 
   let finalText = '';
 
   try {
-    for (let round = 0; round < 4; round++) {
-      const r = await streamOnce(buildBody({ model: cfg.model, system, messages, maxTokens: cfg.maxOutputTokens, stream: true, withTools: !dry }), onText, signal);
+    const ROUNDS = 4;
+    for (let round = 0; round < ROUNDS; round++) {
+      const mustAnswer = round === ROUNDS - 1 || (ctx?.searches || 0) >= 3;
+      // IQGateway ignores tool_choice 'none' for Gemini, so "must answer now" sends no tools at all
+      const toolChoice = round === 0 && requireSearch ? { type: 'function', function: { name: 'search_kb' } } : undefined;
+      const r = await streamOnce(buildBody({ model: cfg.model, system, messages, maxTokens: cfg.maxOutputTokens, stream: true, withTools: !dry && !noTools && !mustAnswer, toolChoice }), onText, signal);
       usage.in += r.usage.in; usage.out += r.usage.out; usage.cache += r.usage.cache;
       if (r.usd === null) usdKnown = false; else usd += r.usd;
       finalText += r.text;
@@ -201,10 +217,18 @@ export async function answer({ system, history, userTurn, ctx, onText, onEvent, 
         messages.push({ role: 'tool', tool_call_id: c.id, content: String(out.result ?? '') });
       }
     }
+    // still no words for the visitor (only tool calls): one last round without tools, told to answer now
+    if (!finalText.trim() && !dry) {
+      messages.push({ role: 'user', content: 'Answer the visitor now in 2–3 short sentences, using only the search results above. If they do not cover it, say so and offer a consultant.' });
+      const r = await streamOnce(buildBody({ model: cfg.model, system, messages, maxTokens: cfg.maxOutputTokens, stream: true, withTools: false }), onText, signal);
+      usage.in += r.usage.in; usage.out += r.usage.out; usage.cache += r.usage.cache;
+      if (r.usd === null) usdKnown = false; else usd += r.usd;
+      finalText += r.text;
+    }
   } finally {
     if (usage.in || usage.out || usd) await addUsage(usage.in, usage.out, usage.cache, usdKnown ? usd : null);
   }
-  return { text: finalText.trim(), usage, toolCalls };
+  return { text: finalText.trim(), usage, toolCalls, usd: usdKnown ? usd : null };
 }
 
 /** Small-model screen for every message the regex lets through. Fails open (on_topic) so real visitors are never blocked by an outage. */

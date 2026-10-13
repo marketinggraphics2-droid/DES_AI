@@ -43,6 +43,48 @@ export async function search(query, { k = 6, product = null } = {}) {
   return [...scores.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([id, s]) => ({ ...rows.get(id), score: s }));
 }
 
+// ---- per-conversation search cache: follow-ups reuse what was already found ----
+const convCache = new Map(); // conversationId -> { at, results: Map(key -> rows) }
+const CONV_TTL_MS = 3600e3, CONV_MAX = 500;
+const QUERY_STOP = new Set('a an the and or of for to in on at is are do does can could you your our we i me my it this that with about what how which please po ba ang ng mga sa ko mo'.split(' '));
+const cacheKey = (query, product) => (product || '') + '|' + query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w && !QUERY_STOP.has(w)).sort().join(' ');
+function convEntry(cid) {
+  const now = Date.now();
+  for (const [k, v] of convCache) if (now - v.at > CONV_TTL_MS) convCache.delete(k);
+  let e = convCache.get(cid);
+  if (!e) { e = { at: now, results: new Map() }; convCache.set(cid, e); if (convCache.size > CONV_MAX) convCache.delete(convCache.keys().next().value); }
+  e.at = now;
+  return e;
+}
+/** search() with a per-conversation cache. Returns {rows, cached}. */
+export async function searchCached(conversationId, query, { k = 4, product = null } = {}) {
+  if (!conversationId) return { rows: await search(query, { k, product }), cached: false };
+  const e = convEntry(conversationId), key = cacheKey(query, product);
+  if (e.results.has(key)) return { rows: e.results.get(key), cached: true };
+  const rows = await search(query, { k, product });
+  e.results.set(key, rows);
+  return { rows, cached: false };
+}
+/** Pages already found in this conversation (newest first, unique by url + section), for the <found_earlier> hint. */
+export function foundEarlier(conversationId, max = 8) {
+  const e = convCache.get(conversationId);
+  if (!e) return [];
+  const seen = new Set(), out = [];
+  for (const rows of [...e.results.values()].reverse()) for (const r of rows) {
+    const id = r.url + '#' + (r.section || '');
+    if (!seen.has(id)) { seen.add(id); out.push({ title: r.title, section: r.section, url: r.url, product: r.product }); }
+  }
+  return out.slice(0, max);
+}
+
+// Messages that need no website search: greetings, thanks, yes/no, goodbyes.
+const SMALL_TALK = /^(hi+|hello|hey|good (morning|afternoon|evening|day)|thanks?( you)?( so much)?( po)?|thank you( po)?|salamat( po)?|ok(ay)?|sige( po)?|noted|yes|no|oo|opo|hindi|bye|goodbye|ingat|kumusta( ka)?|musta|who are you|sino ka)[\s!.,?😊🙂👍]*$/i;
+export const isSmallTalk = (text) => SMALL_TALK.test(String(text || '').trim());
+// Questions about what something does / supports / costs to run → need website facts.
+const CAPABILITY = /\b(features?|functions?|capabilit|support|integrat|connect|sync|module|compute|handle|manage|track|report|generate|automat|work with|compatible|requirement|implement|deploy|cloud|on-?prem|install|set ?up|how (does|do|long|can)|what (is|are|does)|can (it|you|iq|sap)|does (it|iq|sap)|is there|kaya ba|pwede ba|paano|ano ang)\b/i;
+/** True when the answer must come from website content (or an approved answer). */
+export const needsKb = (text, product) => !isSmallTalk(text) && (!!product || CAPABILITY.test(text));
+
 export async function glossaryHits(text) {
   const r = await q('select term, definition from glossary');
   const t = text.toLowerCase();
