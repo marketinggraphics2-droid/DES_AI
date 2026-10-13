@@ -302,3 +302,7 @@ create table if not exists share_links (
   summary text                                 -- AI-written summary, made when the link is created
 );
 create index if not exists share_links_conv_idx on share_links(conversation_id);
+
+-- ---- dashboard sign-in: "keep me signed in" + sign-out after inactivity (2026-10-13) ----
+alter table admin_sessions add column if not exists remember boolean not null default false;
+alter table admin_sessions add column if not exists last_active_at timestamptz default now(); -- last time the person used the dashboard (not background refreshes)

@@ -439,8 +439,28 @@ if (want('admin')) await guard('admin', async () => {
 sec('10c. Dashboard accounts, roles, audit log');
 if (want('users')) await guard('users', async () => {
   const post = (p, body, cookie) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie, 'x-des-admin': '1' } : {}) }, body: JSON.stringify(body) });
+  // the backend's address opens the dashboard
+  let r = await fetch(base + '/', { redirect: 'manual' });
+  ok('http://…:8787/ goes to the dashboard sign-in', r.status === 302 && r.headers.get('location') === '/admin/', `${r.status} → ${r.headers.get('location')}`);
+  // "keep me signed in" vs a browser-session sign-in
+  const cookieOf = (res) => (res.headers.getSetCookie?.() || []).find((x) => x.startsWith('des_admin=')) || '';
+  r = await post('/api/admin/auth/login', { email: USERS.user, password: PASSWORD });
+  const plain = cookieOf(r), plainCookie = plain.split(';')[0];
+  ok('without "keep me signed in": cookie ends when the browser closes', r.status === 200 && !/Max-Age/i.test(plain), plain.replace(/des_admin=[^;]+/, 'des_admin=…'));
+  r = await post('/api/admin/auth/login', { email: USERS.user, password: PASSWORD, remember: true });
+  const kept = cookieOf(r), keptCookie = kept.split(';')[0];
+  ok('"keep me signed in": cookie kept for 30 days', /Max-Age=2592000/.test(kept), kept.replace(/des_admin=[^;]+/, 'des_admin=…'));
+  const meP = await (await fetch(base + '/api/admin/auth/me', { headers: { cookie: plainCookie } })).json();
+  ok('/auth/me tells the dashboard the inactivity limit (30 min)', meP.session?.remember === false && meP.session?.idle_minutes === 30, JSON.stringify(meP.session));
+  // inactivity: the dashboard reports how long the person has been idle
+  const idle = (cookie, min) => fetch(base + '/api/admin/overview', { headers: { cookie, 'x-des-idle-ms': String(min * 60e3) } });
+  ok('29 minutes idle: still signed in', (await idle(plainCookie, 29)).status === 200);
+  r = await idle(plainCookie, 31);
+  ok('31 minutes idle: signed out (session_timeout)', r.status === 401 && (await r.json()).error === 'session_timeout');
+  ok('…and that session is gone for good', (await fetch(base + '/api/admin/auth/me', { headers: { cookie: plainCookie } })).status === 401);
+  ok('"keep me signed in" is not signed out after 31 idle minutes', (await idle(keptCookie, 31)).status === 200);
   // the shared token no longer opens the dashboard
-  let r = await fetch(base + '/api/admin/overview', { headers: { authorization: 'Bearer ' + ADMIN } });
+  r = await fetch(base + '/api/admin/overview', { headers: { authorization: 'Bearer ' + ADMIN } });
   ok('ADMIN_TOKEN no longer opens the dashboard (only npm run stop)', r.status === 401, r.status);
   // sign-in + cookie
   r = await post('/api/admin/auth/login', { email: USERS.admin, password: PASSWORD });
@@ -511,6 +531,7 @@ if (want('users')) await guard('users', async () => {
   await A.req('GET', '/api/admin/export/leads.csv', { as: 'admin' });
   const au = (await A.req('GET', '/api/admin/audit?limit=200', { admin: true })).json;
   ok('audit log: export with who did it', au.some((a) => a.action === 'export.leads' && a.user_email === USERS.admin));
+  ok('audit log: sign-out after inactivity', au.some((a) => a.action === 'logout.timeout' && a.user_email === USERS.user));
   ok('audit log: sign-ins, failed sign-ins, lockout, role change, disable', ['login', 'login.failed', 'login.locked', 'user.role_changed', 'user.disabled', 'password.changed', 'logout'].every((x) => au.some((a) => a.action === x)), [...new Set(au.map((a) => a.action))].join(','));
   // command line: refuses while the backend has the embedded database open
   const cli = createUser(testEnv(PORT, dbDir), 'user', `cli.${Date.now()}@des-test.dev`);
@@ -754,7 +775,7 @@ sec('12. Admin dashboard (simulated browser)');
 if (want('dashboard')) await guard('dashboard', async () => {
   // sign in through the form
   const L = await loadPage(base, '/admin/');
-  ok('dashboard asks for email and password', await until(() => !L.$('#login').hidden && !!L.$('#emailInput') && !!L.$('#passwordInput'), 8000));
+  ok('dashboard asks for email and password, with "keep me signed in"', await until(() => !L.$('#login').hidden && !!L.$('#emailInput') && !!L.$('#passwordInput') && !!L.$('#rememberInput'), 8000));
   L.$('#emailInput').value = USERS.superuser; L.$('#passwordInput').value = 'wrong-password-123'; L.$('#loginForm').requestSubmit();
   ok('wrong password: message, still signed out', await until(() => /Wrong email or password/.test(L.$('#loginErr').textContent), 8000) && L.$('#app').hidden);
   L.$('#passwordInput').value = PASSWORD; L.$('#loginForm').requestSubmit();

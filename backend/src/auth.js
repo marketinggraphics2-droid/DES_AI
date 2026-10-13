@@ -4,11 +4,12 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { q } from './db.js';
+import { cfg } from './config.js';
 import { ROLES, can, permissionsOf, routePermission, maskContacts } from './permissions.js';
 import { invalidateSettings, SETTINGS } from './settings.js';
 
 const COOKIE = 'des_admin';
-const SESSION_HOURS = 12;
+const SESSION_HOURS = 12; // without "keep me signed in": the cookie ends with the browser, the session after 12 h at most
 const LOCK_AFTER = 5, LOCK_MINUTES = 15;
 export const MIN_PASSWORD = 10;
 const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
@@ -31,11 +32,12 @@ function readCookie(req) {
   }
   return null;
 }
+/** maxAgeSec null = a browser-session cookie (gone when the browser closes). */
 function setCookie(req, res, value, maxAgeSec) {
   // Secure everywhere except plain http on this computer (browsers keep Secure cookies off non-https sites)
   const host = String(req.headers.host || '').split(':')[0];
   const localHttp = !req.secure && req.headers['x-forwarded-proto'] !== 'https' && ['localhost', '127.0.0.1', '[::1]'].includes(host);
-  res.append('Set-Cookie', `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${localHttp ? '' : '; Secure'}`);
+  res.append('Set-Cookie', `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict${maxAgeSec == null ? '' : `; Max-Age=${maxAgeSec}`}${localHttp ? '' : '; Secure'}`);
 }
 
 /** Who did what, when. Never throws. */
@@ -51,11 +53,25 @@ export async function adminAuth(req, res, next) {
   try {
     if (req.path === '/auth/login' || req.path === '/shutdown') return next(); // shutdown checks its own machine token
     const tok = readCookie(req);
-    const s = tok && (await q(`select s.token_hash, s.expires_at, u.id, u.email, u.name, u.role, u.disabled
+    const s = tok && (await q(`select s.token_hash, s.expires_at, s.remember, s.last_active_at, u.id, u.email, u.name, u.role, u.disabled
                                from admin_sessions s join users u on u.id = s.user_id where s.token_hash = $1`, [sha(tok)])).rows[0];
     if (!s || s.disabled || new Date(s.expires_at) < new Date()) return res.status(401).json({ error: 'login_required' });
-    q('update admin_sessions set last_seen_at = now() where token_hash = $1', [s.token_hash]).catch(() => { });
+    // inactivity: the dashboard says how long the person has been idle (x-des-idle-ms), so its own background
+    // refreshes don't count as use. Requests without the header (scripts, tests) count as use.
+    const idleMs = Math.max(0, Number(req.get('x-des-idle-ms')) || 0);
+    const reported = Date.now() - idleMs, stored = new Date(s.last_active_at || 0).getTime();
+    const limitMs = s.remember ? cfg.adminRememberDays * 86400e3 : cfg.adminIdleMinutes * 60e3;
+    const activeAt = Math.max(stored, reported);
+    // signed out when the dashboard reports too long without use, or nothing has used the session for too long
+    if (Date.now() - reported > limitMs || Date.now() - stored > limitMs) {
+      await q('delete from admin_sessions where token_hash = $1', [s.token_hash]);
+      await audit(req, 'logout.timeout', s.email, { idle_minutes: Math.round((Date.now() - Math.min(reported, stored)) / 60e3) }, s);
+      setCookie(req, res, '', 0);
+      return res.status(401).json({ error: 'session_timeout' });
+    }
+    if (req.path !== '/stream') q('update admin_sessions set last_seen_at = now(), last_active_at = to_timestamp($2::double precision / 1000) where token_hash = $1', [s.token_hash, activeAt]).catch(() => { });
     req.user = { id: s.id, email: s.email, name: s.name, role: s.role }; req.sessionHash = s.token_hash;
+    req.session_ = { remember: s.remember, expires_at: s.expires_at };
     // changes need a header a cross-site form or image cannot send (with SameSite=Strict on the cookie)
     if (!['GET', 'HEAD'].includes(req.method) && req.get('x-des-admin') !== '1') return res.status(403).json({ error: 'csrf' });
     const perm = routePermission(req.method, req.path);
@@ -87,13 +103,15 @@ authRouter.post('/auth/login', wrap(async (req, res) => {
     return res.status(401).json({ error: 'invalid_login' });
   }
   const token = crypto.randomBytes(32).toString('base64url');
-  await q(`insert into admin_sessions(token_hash, user_id, expires_at, ip, user_agent) values($1, $2, now() + make_interval(hours => $3), $4, $5)`,
-    [sha(token), u.id, SESSION_HOURS, req.adminIp || null, String(req.headers['user-agent'] || '').slice(0, 200)]);
+  const remember = req.body?.remember === true; // "keep me signed in on this computer"
+  const hours = remember ? cfg.adminRememberDays * 24 : SESSION_HOURS;
+  await q(`insert into admin_sessions(token_hash, user_id, expires_at, ip, user_agent, remember) values($1, $2, now() + make_interval(hours => $3), $4, $5, $6)`,
+    [sha(token), u.id, hours, req.adminIp || null, String(req.headers['user-agent'] || '').slice(0, 200), remember]);
   await q('update users set failed_logins = 0, locked_until = null, last_login_at = now() where id = $1', [u.id]);
   await q(`delete from admin_sessions where expires_at < now()`);
-  setCookie(req, res, token, SESSION_HOURS * 3600);
-  await audit(req, 'login', u.email, null, u);
-  res.json({ ok: true, user: publicUser(u), permissions: permissionsOf(u.role) });
+  setCookie(req, res, token, remember ? hours * 3600 : null);
+  await audit(req, 'login', u.email, { remember }, u);
+  res.json({ ok: true, user: publicUser(u), permissions: permissionsOf(u.role), session: { remember, idle_minutes: remember ? null : cfg.adminIdleMinutes } });
 }));
 
 authRouter.post('/auth/logout', wrap(async (req, res) => {
@@ -103,7 +121,8 @@ authRouter.post('/auth/logout', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-authRouter.get('/auth/me', (req, res) => res.json({ user: req.user, permissions: permissionsOf(req.user.role) }));
+authRouter.get('/auth/me', (req, res) => res.json({ user: req.user, permissions: permissionsOf(req.user.role),
+  session: { remember: !!req.session_?.remember, expires_at: req.session_?.expires_at, idle_minutes: req.session_?.remember ? null : cfg.adminIdleMinutes } }));
 
 authRouter.post('/auth/password', wrap(async (req, res) => {
   const u = (await q('select * from users where id = $1', [req.user.id])).rows[0];

@@ -69,14 +69,36 @@
     document.body.append(t); setTimeout(() => t.remove(), bad ? 5000 : 2600);
   }
 
+  // ---- inactivity: the person's own clicks / keys / scrolls count as use; background refreshes don't ----
+  let lastActivity = Date.now();
+  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart', 'mousemove', 'scroll']) document.addEventListener(ev, () => { lastActivity = Date.now(); idleWarned = false; document.querySelector('.idle-warning')?.remove(); }, { passive: true, capture: true });
+  let idleTimer = null, idleWarned = false;
+  function watchIdle(session) {
+    clearInterval(idleTimer);
+    if (!session || session.remember || !session.idle_minutes) return;
+    const limit = session.idle_minutes * 60e3;
+    idleTimer = setInterval(() => {
+      const idle = Date.now() - lastActivity;
+      if (idle >= limit) { clearInterval(idleTimer); signOut(`Signed out after ${session.idle_minutes} minutes without activity. Sign in again to continue.`); }
+      else if (idle >= limit - 60e3 && !idleWarned) {
+        idleWarned = true;
+        document.body.append(h('div', { class: 'idle-warning', role: 'alert' }, h('b', { text: 'Still there?' }), ' You will be signed out in 1 minute. Move the mouse or press a key to stay signed in.'));
+      }
+    }, 5000);
+  }
+
   async function api(path, { method = 'GET', body, raw = false } = {}) {
     const r = await fetch('/api' + path, {
       method, credentials: 'same-origin',
       // x-des-admin: changes need a header a form on another website can't send
-      headers: { ...(method !== 'GET' ? { 'x-des-admin': '1' } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+      headers: { 'x-des-idle-ms': String(Date.now() - lastActivity), ...(method !== 'GET' ? { 'x-des-admin': '1' } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    if (r.status === 401) { showLogin('Your sign-in expired. Sign in again.'); throw new Error('unauthorized'); }
+    if (r.status === 401) {
+      const why = (await r.clone().json().catch(() => ({}))).error;
+      showLogin(why === 'session_timeout' ? 'Signed out after a while without activity. Sign in again to continue.' : 'Your sign-in expired. Sign in again.');
+      throw new Error('unauthorized');
+    }
     if (r.status === 403) throw new Error('Your role can’t do that.');
     if (!r.ok) { let msg = `Request failed (${r.status})`; try { const j = await r.json(); msg = j.error ? j.error.replace(/_/g, ' ') : msg; } catch { } throw new Error(msg); }
     return raw ? r : r.json();
@@ -129,28 +151,29 @@
 
   // ---------------- login / shell ----------------
   function showLogin(msg = '') {
-    disconnectLive();
+    disconnectLive(); clearInterval(idleTimer); document.querySelector('.idle-warning')?.remove();
     $('#app').hidden = true; $('#login').hidden = false;
     $('#loginErr').textContent = msg; $('#passwordInput').value = ''; ($('#emailInput').value ? $('#passwordInput') : $('#emailInput')).focus();
   }
   $('#loginForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     try {
-      const r = await fetch('/api/admin/auth/login', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: $('#emailInput').value.trim(), password: $('#passwordInput').value }) });
+      const r = await fetch('/api/admin/auth/login', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: $('#emailInput').value.trim(), password: $('#passwordInput').value, remember: $('#rememberInput').checked }) });
       const j = await r.json().catch(() => ({}));
       if (r.status === 423) { $('#loginErr').textContent = `Too many wrong passwords. Try again after ${new Date(j.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}, or ask a superuser to unlock you.`; return; }
       if (!r.ok) { $('#loginErr').textContent = r.status === 401 ? 'Wrong email or password.' : `The backend answered ${r.status}. Is it running?`; $('#passwordInput').value = ''; return; }
       boot();
     } catch { $('#loginErr').textContent = 'Could not reach the backend. Is it running?'; }
   });
-  async function signOut() { try { await api('/admin/auth/logout', { method: 'POST', body: {} }); } catch { } showLogin('Signed out.'); }
+  async function signOut(msg = 'Signed out.') { try { await api('/admin/auth/logout', { method: 'POST', body: {} }); } catch { } showLogin(msg); }
 
   async function boot() {
-    try { const me = await api('/admin/auth/me'); state.me = me.user; state.perms = new Set(me.permissions); state.status = await api('/admin/status'); }
+    try { const me = await api('/admin/auth/me'); state.me = me.user; state.perms = new Set(me.permissions); state.session = me.session; state.status = await api('/admin/status'); }
     catch (e) { if (e.message !== 'unauthorized') showLogin('Could not reach the backend. Is it running?'); return; }
     // menu: only the pages this role may open
     document.querySelectorAll('#nav button[data-perm]').forEach((b) => { b.hidden = !b.dataset.perm.split(' ').some(can); });
     $('#login').hidden = true; $('#app').hidden = false;
+    lastActivity = Date.now(); watchIdle(state.session);
     renderFoot(); refreshReviewCount(); connectLive();
     if (!location.hash) location.hash = '#/overview'; else route();
   }
@@ -179,8 +202,9 @@
       h('div', { text: s.model }),
       budget ? h('div', { text: `Today: ${usd(budget.spent)} of ${usd(budget.budget)} budget` }) : null,
       h('div', { class: 'side__user' }, h('b', { text: state.me.name || state.me.email }), ' ', badge({ superuser: 'Superuser', admin: 'Admin', user: 'User' }[state.me.role] || state.me.role)),
+      h('div', { class: 'muted', text: state.session?.remember ? 'Kept signed in on this computer' : `Signs out after ${state.session?.idle_minutes || 30} min without use` }),
       h('button', { type: 'button', text: 'Change password', on: { click: openPassword } }),
-      h('button', { type: 'button', text: 'Sign out', on: { click: signOut } }),
+      h('button', { type: 'button', text: 'Sign out', on: { click: () => signOut() } }),
     );
   }
   async function refreshReviewCount() {

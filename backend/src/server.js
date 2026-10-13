@@ -62,6 +62,8 @@ app.post('/api/admin/shutdown', (req, res) => {
   setTimeout(() => requestStop('stop requested', 99), 100); // 99 tells scripts/dev.js to exit instead of waiting
 });
 app.use('/api/admin', adminRouter);
+// the backend's own address opens the dashboard (sign-in page, or the dashboard when already signed in)
+app.get('/', (_req, res) => res.redirect(302, '/admin/'));
 // share link: the one public, read-only page outside /admin (no sign-in, no IP or website check; the token is the key)
 app.get('/share/:token', sharePage);
 // admin dashboard (data needs a signed-in user; the page itself is static)

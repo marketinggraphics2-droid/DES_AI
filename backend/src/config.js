@@ -10,7 +10,9 @@ export const cfg = {
   websiteUrl: (process.env.WEBSITE_URL || '').replace(/\/$/, ''),
   allowedOrigins: [...list(process.env.ALLOWED_ORIGINS), ...list(process.env.WEBSITE_URL).map((u) => new URL(u).origin)],
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
-  adminToken: process.env.ADMIN_TOKEN || '', // only for npm run stop / the shutdown call from this computer; dashboard users sign in
+  adminToken: process.env.ADMIN_TOKEN || '',
+  adminIdleMinutes: num(process.env.ADMIN_IDLE_MINUTES, 30),   // dashboard: signed out after this long without use (unless "keep me signed in")
+  adminRememberDays: num(process.env.ADMIN_REMEMBER_DAYS, 30), // "keep me signed in on this computer" // only for npm run stop / the shutdown call from this computer; dashboard users sign in
   // Express 'trust proxy': which proxies may set X-Forwarded-For. loopback = cloudflared on this computer;
   // behind DigitalOcean's load balancer use 1 (one hop) or its address range.
   trustProxy: (() => { const v = process.env.TRUST_PROXY ?? 'loopback'; return /^\d+$/.test(v) ? Number(v) : v === 'true' ? true : v; })(),
