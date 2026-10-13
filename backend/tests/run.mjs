@@ -594,7 +594,8 @@ if (want('share')) await guard('share', async () => {
   await A.chat(s.token, 'Do you handle BIR CAS for a 40-person trading company?', id);
   await A.chat(s.token, 'My card is 4111 1111 1111 1111, can you help with SAP?', id);
   let r = await A.req('POST', `/api/admin/conversations/${cid}/share`, { as: 'user', body: { ttl: '7d' } });
-  ok('User role cannot create share links', r.status === 403);
+  ok('User role (telemarketer) creates a share link', r.status === 200 && /\/share\//.test(r.json.url), r.text);
+  ok('…and revokes it', (await A.req('DELETE', '/api/admin/shares/' + r.json?.id, { as: 'user' })).status === 200);
   r = await A.req('POST', `/api/admin/conversations/${cid}/share`, { as: 'admin', body: { ttl: '7d' } });
   ok('Admin creates a 7-day share link', r.status === 200 && /\/share\/[A-Za-z0-9_-]+$/.test(r.json.url) && Math.abs(new Date(r.json.expires_at) - Date.now() - 7 * 86400e3) < 120e3, r.text);
   const url = r.json.url, token = url.split('/share/')[1], linkId = r.json.id;
@@ -734,7 +735,9 @@ if (want('widget')) await guard('widget', async () => {
   W.$$('.dq-chat__chips button').reverse().find((b) => /No thanks/.test(b.textContent)).click();
   await until(() => locked && !W.input.disabled && W.bots().length > n0, 40000, 30); clearInterval(watch);
   ok('text box locked while DES replies, unlocked after', locked && !W.input.disabled, W.input.placeholder);
-  ok('held question answered after onboarding, greeted by name', /Thanks, Lea/.test(W.bots().slice(n0).join(' ')) && /CAS/i.test(W.bots().slice(n0).join(' ')));
+  // the held question also carries "How much would SAP cost…" (asked during sign-up): the answer is either about
+  // BIR CAS or the price guardrail's "free business analysis" reply
+  ok('held question answered after onboarding, greeted by name', /Thanks, Lea/.test(W.bots().slice(n0).join(' ')) && /CAS|business analysis/i.test(W.bots().slice(n0).join(' ')), W.bots().slice(n0).join(' | ').slice(0, 200));
   ok('the question asked during sign-up was held and answered too', await until(async () => { const c = (await A.req('GET', '/api/admin/conversations?q=Lea&limit=5', { admin: true })).json[0]; const d = c && (await A.req('GET', `/api/admin/conversations/${c.id}/detail`, { admin: true })).json; return d?.messages.some((m) => m.role === 'user' && m.kind === 'chat' && /BIR CAS/.test(m.content) && /10 users/.test(m.content)); }, 5000));
   ok('header shows "Chatting as Lea"', /Chatting as Lea/.test(W.status()), W.status());
   const stored = JSON.parse(W.w.localStorage.getItem('des:visitor') || '{}');
@@ -827,8 +830,9 @@ if (want('dashboard')) await guard('dashboard', async () => {
   U.w.location.hash = '#/leads'; await until(() => U.$('#main h1')?.textContent === 'Conversations & leads', 8000); await sleep(300);
   ok('old Leads address opens Conversations & leads filtered to leads', /#\/conversations\/leads$/.test(U.w.location.hash) && U.$$('#main select').some((s) => s.value === 'lead'), U.w.location.hash);
   ok('User role: no CSV export button', !U.$$('#main button').some((b) => /CSV/.test(b.textContent)));
-  U.w.location.hash = '#/conversations'; await until(() => U.$('tr.is-click'), 8000); U.$('tr.is-click').click(); await until(() => U.$('.drawer .thread'), 8000);
-  ok('User role: no share link or delete button in a conversation', ![...U.$$('.drawer button')].some((b) => /Create share link|Delete this visitor/.test(b.textContent)));
+  U.w.location.hash = '#/conversations'; await sleep(400); await until(() => U.$('tr.is-click') && !U.$('#main .loading'), 8000); await sleep(400);
+  U.$('tr.is-click').click(); await until(() => U.$('.drawer .remarks-card'), 8000);
+  ok('User role: share link button yes, delete-visitor button no', [...U.$$('.drawer button')].some((b) => /Create share link/.test(b.textContent)) && ![...U.$$('.drawer button')].some((b) => /Delete this visitor/.test(b.textContent)), U.$$('.drawer button').map((b) => b.textContent.trim()).join(' | '));
   U.d.dispatchEvent(new U.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
   U.w.location.hash = '#/settings'; await sleep(600);
   ok('User role: typing a hidden page address shows the Overview instead', U.$('#main h1')?.textContent !== 'Settings', U.$('#main h1')?.textContent);

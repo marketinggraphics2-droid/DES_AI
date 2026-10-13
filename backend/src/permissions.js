@@ -17,7 +17,7 @@ export const PERMISSIONS = {
   'leads.status': ALL,             // change a lead's status
   'remarks.add': ALL,              // add remarks to a conversation (e.g. call notes); delete your own
   'leads.export': ADMINS,          // Leads CSV export (and the approved-answer training file)
-  'share.create': ADMINS,          // share links for a conversation
+  'share.create': ALL,             // share links for a conversation (create, list, revoke)
   'finetune.manage': ADMINS,       // Fine-tune answers, Needs review, product notes, test box
   'kb.manage': ADMINS,             // Website knowledge
   'facts.manage': ADMINS,          // Facts & glossary

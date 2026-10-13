@@ -216,11 +216,13 @@
 
   function route() {
     if ($('#app').hidden) return;
-    const [page, ...rest] = location.hash.replace(/^#\/?/, '').split('/');
+    // Leads now live in Conversations (lead filter): the old address opens that page directly
+    let hash = location.hash;
+    if (/^#\/?leads\b/.test(hash)) { hash = '#/conversations/leads'; history.replaceState(null, '', hash); }
+    const [page, ...rest] = hash.replace(/^#\/?/, '').split('/');
     const arg = rest.length ? decodeURIComponent(rest.join('/')) : null;
     document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('is-on', b.dataset.page === page));
     closeLayer();
-    if (page === 'leads') { location.replace('#/conversations/leads'); return; } // Leads now live in Conversations (lead filter)
     const pages = { overview: pageOverview, conversations: pageConversations, finetune: pageFinetune, review: pageReview, kb: pageKb, settings: pageSettings, users: pageUsers, audit: pageAudit };
     const btn = document.querySelector(`#nav button[data-page="${page}"]`);
     live.page = null; // the page sets its own live handler
@@ -1013,7 +1015,7 @@
   }
 
   // ---------------- users (superuser) ----------------
-  const ROLE_OPTS = [['user', 'User · chats and leads (with contact details), remarks; no exports'], ['admin', 'Admin · also answers, knowledge, exports, share links'], ['superuser', 'Superuser · everything incl. users, instructions, audit']];
+  const ROLE_OPTS = [['user', 'User · chats and leads (with contact details), remarks, share links; no exports'], ['admin', 'Admin · also answers, knowledge, exports, share links'], ['superuser', 'Superuser · everything incl. users, instructions, audit']];
   async function pageUsers() {
     loading();
     let users; try { users = await api('/admin/users'); } catch (e) { return fail(e); }

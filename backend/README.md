@@ -27,7 +27,7 @@ First account (stop the backend first when using the embedded database):
 npm run user:create -- --role superuser --email you@dynamiqes.com --name "Your Name"
 ```
 
-After that, a superuser adds people in **Users**. Roles: **Superuser** (everything, incl. users, DES instructions, audit log, system settings, deleting visitor data), **Admin** (everything except those), **User** (overview, conversations and leads with phone and email, remarks; no exports or settings, e.g. for the telemarketer). The table is in `src/permissions.js`. Five wrong passwords lock an account for 15 minutes. `npm run user:reset-password -- --email …` resets a password from the command line. `ADMIN_TOKEN` is now only the machine token `npm run stop` uses.
+After that, a superuser adds people in **Users**. Roles: **Superuser** (everything, incl. users, DES instructions, audit log, system settings, deleting visitor data), **Admin** (everything except those), **User** (overview, conversations and leads with phone and email, remarks, share links; no exports or settings, e.g. for the telemarketer). The table is in `src/permissions.js`. Five wrong passwords lock an account for 15 minutes. `npm run user:reset-password -- --email …` resets a password from the command line. `ADMIN_TOKEN` is now only the machine token `npm run stop` uses.
 
 - **Overview**: chats, questions, leads, handoffs, ratings, approved-answer use, AI cost, questions per day, product interest, activity feed.
 - **Conversations / Leads**: transcripts with tool calls, guardrail changes and feedback; lead status; CSV export; visitor data erasure.
