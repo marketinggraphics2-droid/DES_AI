@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { cfg } from './config.js';
 import { q, withTx } from './db.js';
 import { embed, toVector } from './embeddings.js';
-import { detectProduct } from './retrieval.js';
+import { productForPage, productPageGone } from './products.js';
 
 const KIND_BY_PATH = [[/\/products\//, 'product'], [/\/careers\//, 'career'], [/\/testimonials\//, 'testimonial'], [/\/news-event\//, 'news'], [/^https?:\/\/[^/]+\/(blogs\/)?$/, 'page']];
 export function kindOf(url, sitemapKind) {
@@ -47,10 +47,12 @@ async function upsert({ url, title, kind, text, lastmod, source }) {
   const existing = (await q('select id, content_hash from kb_documents where url=$1', [url])).rows[0];
   if (existing && existing.content_hash === hash) {
     await q(`update kb_documents set status='active', lastmod=coalesce($2,lastmod) where id=$1`, [existing.id, lastmod]);
+    if (kind === 'product') await productForPage(url, title); // a product page that came back makes its product live again
     return { url, action: 'unchanged' };
   }
   const chunks = chunkText(text, title, { blogIntroOnly: kind === 'blog' });
-  const product = kind === 'product' ? detectProduct(title + ' ' + text.slice(0, 500)) : null;
+  // a product page belongs to its product; a page not seen before adds a new product (named from its title, for staff to check)
+  const product = kind === 'product' ? await productForPage(url, title) : null;
   const vecs = await embed(chunks.map((c) => c.chunk), 'document');
   await withTx(async (tx) => {
     const doc = await tx.query(`insert into kb_documents(url,title,kind,lastmod,content_hash,status,updated_at) values($1,$2,$3,$4,$5,'active',now())
@@ -67,6 +69,7 @@ export async function ingestUrl(url, { action = 'update', source = 'manual', sit
   try {
     if (action === 'trash' || action === 'delete') {
       await q(`update kb_documents set status='archived', updated_at=now() where url=$1`, [url]);
+      await productPageGone(url);
       await q('insert into ingest_log(source,url,action,ok) values($1,$2,$3,true)', [source, url, 'archived']);
       return { url, action: 'archived' };
     }

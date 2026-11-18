@@ -10,7 +10,7 @@ Website (WordPress)                    DigitalOcean
 │ - scripted intro │  stream   │  2. Input guardrails                                  │
 └──────────────────┘           │  3. Retrieval: vector search on KB (pgvector)         │
                                │  4. LLM call  (system instruction + KB chunks + tools)│
-                               │  5. Tool loop (save_lead, book_demo, handoff, ...)    │
+                               │  5. Tool loop (save_lead, book_demo, search_kb, ...)  │
                                │  6. Output guardrails                                 │
                                │  7. Log turn → Postgres                               │
                                ├───────────────────────────────────────────────────────┤
@@ -32,7 +32,7 @@ Website (WordPress)                    DigitalOcean
 | **guardrails** | Checks before and after the LLM. | Input: rate limit (per IP + session), max 2,000 chars, block prompt-injection phrases, strip PII patterns (card numbers, TIN) and warn. Output: block URLs not on dynamiqes.com, block any ₱ / price amounts, strip markdown headings, length cap. Cheap regex + a short classifier call only if needed. |
 | **api → LLM** | Model call. | Through IQGateway (`iqlicense.dynamiqes.com/v1`, OpenAI-compatible; routes `claude-*`/`gpt-*`/`gemini-*`, bills the product wallet). Default Claude (use the current Sonnet-class model for cost/latency; Haiku for the guardrail classifier). Keep the provider behind one adapter so it can be swapped. |
 | **system instruction** | `docs/system-instruction.md` §1–§3, §5–§7. | Loaded from a file/DB row at startup; versioned. The **knowledge base (§4) is NOT pasted into the prompt** — it goes into vector search so it can grow with the blog. Only the short company/contact facts stay in the prompt. |
-| **tool calling** | Functions the LLM can call. | `save_lead(company, industry, need)` · `book_demo(preferred_date?)` · `handoff_to_human(reason)` · `search_kb(query)` (explicit retrieval when the auto-retrieval missed) · `get_open_jobs()`. All write to Postgres; `book_demo` also emails sales. |
+| **tool calling** | Functions the LLM can call. | `save_lead(company, industry, need)` · `book_demo(preferred_date?)` · `search_kb(query)` (explicit retrieval when the auto-retrieval missed) · `get_open_jobs()`. All write to Postgres; `book_demo` also emails sales. |
 | **websearch??** | Live internet search. | **No.** It opens the bot to off-brand/unsafe answers and makes it hallucinate competitor facts. Everything the bot needs is on dynamiqes.com. Revisit only if the bot must answer live BIR-regulation questions — and even then prefer re-ingesting the blog. |
 | **vector search** | Semantic retrieval over the KB. | `pgvector` in the same Postgres (no separate vector DB). Chunks ≈ 400–600 tokens with page title + URL as metadata. Hybrid: vector cosine + Postgres full-text (`tsvector`) for product names like "IQ REM". Top-6 chunks go into the prompt as context with their URLs so the bot can link. |
 | **dictionary** | The knowledge base itself. | Table `kb_documents` (one row per URL) + `kb_chunks` (chunk, embedding, url, title, section, updated_at). Source = the scrape in `reference/website-scrape-2026-10-01/` plus the blog posts. Ingest job re-scrapes the Yoast sitemap weekly and re-embeds only changed pages (`lastmod`). Also holds a small **glossary** table (SAP B1, CAS, EWT, PAR, SOA…) injected when a term appears. |
@@ -61,7 +61,7 @@ create table conversations (
   visitor_id uuid references visitors(id) on delete cascade,
   started_at timestamptz default now(),
   ended_at timestamptz,
-  status text default 'open',      -- open | handed_off | closed
+  status text default 'open',      -- open | closed | ended
   summary text                     -- LLM one-liner for the admin list
 );
 
@@ -106,7 +106,7 @@ create table golden_answers (           -- human-written ideal replies for tunin
   product text, reviewed_by text, created_at timestamptz default now()
 );
 
-create table handoffs (
+create table handoffs (          -- unused since 2026-11-18 (hand-to-Sales removed); kept for past records
   id bigserial primary key,
   conversation_id uuid references conversations(id),
   reason text,                     -- model | visitor | system | survey | pricing ...
@@ -150,7 +150,7 @@ fetch → strip nav/footer/forms (same extractor as `reference/website-scrape-20
 
 | Type | Volume / change rate | Handling |
 |---|---|---|
-| Product pages (`/products/*`) | 13 pages; features/specs change every few weeks | Highest priority; chunk by feature section; chunks tagged `kind=product, product=IQ Tax` so retrieval can be filtered when the user names a product. Product list for the prompt's "quick guide" is generated from `kb_documents where kind='product'`, not hard-coded. |
+| Product pages (`/products/*`) | 13 pages; features/specs change every few weeks | Highest priority; chunk by feature section; chunks tagged `kind=product, product=IQ Tax` so retrieval can be filtered when the user names a product. The product list is the `products` table (`backend/src/products.js`): each `/products/<slug>/` page is one product. A page the sweep or webhook has not seen before adds a product named from its title, flagged "New" for staff to check the name and nicknames in the dashboard (Fine-tune answers → product → Details). A page that leaves the website switches its product off. |
 | Blog posts | ~190, 2–4 new per week | Ingest title + intro + H2 summaries (not the whole 1,500-word body) to keep retrieval sharp; full body available via `search_kb` tool if needed. New posts are citable the same day. |
 | Careers | 8, changes monthly | `get_open_jobs()` tool reads the live `careers` rows; no stale job titles in the prompt. |
 | News/events, testimonials | rare | Nightly sweep is enough. |
@@ -162,7 +162,7 @@ fetch → strip nav/footer/forms (same extractor as `reference/website-scrape-20
 - Admin page shows: last webhook received, last sweep run, count of pages ingested / changed / failed, and a "Re-ingest now" button per URL.
 
 **Versioning the system instruction**
-`system_prompts` table (version, text, active_from). Product-name list and quick guide are rendered into it at request time from the DB, so adding a 14th IQ product on the website is enough — no prompt edit.
+`system_prompts` table (version, text, active_from). The product-name line is rendered into it from the `products` table (as are the `save_lead` / `search_kb` product choices and product detection), so adding a 14th IQ product on the website is enough — no prompt edit, no code change. The server reloads the list every 5 minutes, so a product added by the nightly sweep (its own process) is picked up without a restart.
 
 ## 3. Getting the data out (name, contact, conversation)
 
@@ -180,8 +180,8 @@ fetch → strip nav/footer/forms (same extractor as `reference/website-scrape-20
 5. Call LLM with tools; run tool loop (max 3).
 6. Output guardrails (no prices, only dynamiqes.com links, strip headings).
 7. Stream reply to widget; write user + assistant + tool rows to `messages`.
-8. **Any failure → human.** LLM error/timeout (>20 s), budget exhausted, guardrail blocked twice, or two 👎 in a row → widget shows the scripted "Let me get a sales consultant" bubble with **[Connect to a consultant]**; handoff emails Sales the transcript + contact and logs a `handoffs` row. The same chip lives in the widget header menu at all times.
-9. **End-of-chat survey** (scripted, zero LLM cost): on close-after-2-answers, 3 min idle, goodbye, or after handoff/demo → 1–5 rating chips + *Not now* / *Connect to a consultant* → reason chips if ≤3 → "Did you find what you came for?" → stored in `feedback`. Per-message 👍/👎 stored the same way.
+8. **Any failure → Sales contact details.** LLM error/timeout (>20 s), budget exhausted, guardrail blocked twice, or two 👎 in a row → widget shows a scripted bubble with the sales team's phone and email. Nothing is sent to Sales (hand-to-Sales was removed 2026-11-18). A **Contact Sales** item in the widget header menu shows the same details.
+9. **End-of-chat survey** (scripted, zero LLM cost): on close-after-2-answers, 3 min idle, goodbye, or after a demo request → 1–5 rating chips + *Not now* → reason chips if ≤3 → "Did you find what you came for?" → stored in `feedback`. Per-message 👍/👎 stored the same way.
 10. After 10 min idle: close conversation, generate `summary`, if `leads` row exists send/refresh the sales email.
 
 **Tuning loop (what the survey data is for)**
@@ -212,7 +212,7 @@ Three things can go wrong: someone burns our LLM budget, someone gets at visitor
 | Rate limits | Per session: 1 message / 3 s, 30 messages / 10 min, 80 messages / day. Per IP: 5 sessions / day. Per *contact* (email/phone): 3 sessions / day. Enforced with Redis or a Postgres counter. |
 | Message caps | 1,000 characters in; model `max_tokens` 500 out; history window = last 10 turns, older turns summarised. |
 | Retrieval cap | Top-6 chunks only (~3k tokens). Hard ceiling per request ≈ 8k input tokens. |
-| Conversation cap | 40 turns per conversation, then "Let me connect you with a consultant" + handoff; a new conversation re-uses the stored visitor (no re-onboarding) but needs a fresh session token. |
+| Conversation cap | 40 turns per conversation, then a polite notice with the sales team's contact; a new conversation re-uses the stored visitor (no re-onboarding) but needs a fresh session token. |
 | Daily budget | Cost meter in Postgres per day; at 80 % of budget → alert to Marketing; at 100 % → bot switches to "leave your details, we'll call you" mode (no LLM calls). Also set a hard **spend limit on the provider dashboard** as the last line. |
 | Model tiering | Haiku-class model for guardrail checks and summaries; Sonnet-class only for the answer. Prompt caching on the system prompt (cuts input cost ~90 % on repeats). |
 | Anomaly alerts | Alert on: >200 requests/h, one IP >50 sessions/week, same message repeated, non-PH traffic spike. Block list in DB (IP, contact, session). |
@@ -255,7 +255,7 @@ Guardrails run **in code**, not only in the prompt — the prompt asks nicely; t
 
 **Tool side**
 8. Tools have strict JSON schemas; the server validates every argument (e.g. `industry` max 60 chars, `preferred_date` must be a future weekday). The model can't call anything not in the list, and tools never take URLs or emails from the model — the contact comes from the onboarding record.
-9. `handoff_to_human` and `book_demo` are idempotent per conversation (can't spam Sales).
+9. `book_demo` is idempotent per conversation (can't spam Sales).
 
 **Output side (after the LLM)**
 10. **Price filter** — reject the reply if it contains `₱`, `PHP`, `P\d`, `\$\d`, "per user per month", percent discounts, or "starts at"; regenerate once with a stricter instruction, else send the canned "contact us for a tailored proposal" line.
@@ -263,7 +263,7 @@ Guardrails run **in code**, not only in the prompt — the prompt asks nicely; t
 12. **Format filter** — remove markdown headings, tables, code blocks; cap at 900 characters; keep bullets and links.
 13. **Claim filter** — a small banned-phrase list the bot must never assert: "guaranteed", "BIR-approved", "ISO/SOC 2 certified", "no downtime", "free of charge", "cheapest", any competitor name + negative adjective. Hit → regenerate.
 14. **Leak filter** — reply must not contain the system prompt text, the words "system instruction", other visitors' names, or the visitor's own contact string.
-15. **Fallback** — any filter fails twice → "I'll have a consultant answer this properly — our team will reach you within 24 hours." and tag the lead `needs_human`.
+15. **Fallback** — any filter fails twice → a scripted reply with the sales team's phone and email.
 
 **Operational**
 16. Every blocked input/output is logged with the reason; a weekly report shows top injection attempts, off-topic themes, and which filter fired, so the prompt and lists can be tuned.
@@ -275,7 +275,7 @@ Guardrails run **in code**, not only in the prompt — the prompt asks nicely; t
 1. Postgres + schema + KB ingest from the existing scrape (1 day).
 2. Chat API with system instruction + retrieval + streaming (1–2 days).
 3. Widget with scripted in-chat onboarding (consent chip, name, contact validation, Filipino variant) + privacy notice bubble (1–2 days).
-4. Tools: save_lead, book_demo, handoff + sales email (1 day).
+4. Tools: save_lead, book_demo + sales email (1 day).
 5. Guardrails + admin page + CSV export (1–2 days).
 6. Test with the sample Q&A in system-instruction.md §6, then soft-launch on one landing page before the homepage.
 

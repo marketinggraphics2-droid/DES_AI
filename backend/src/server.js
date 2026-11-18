@@ -13,6 +13,8 @@ import { closeStreams } from './events.js';
 import { shareAdmin, sharePage } from './share.js';
 import { loadSites, isAllowedOrigin, anySitesConfigured } from './sites.js';
 import { pool, exec } from './db.js';
+import { seedProducts, startProductRefresh } from './products.js';
+import { startProductChecks } from './product-sync.js';
 import fs from 'node:fs';
 
 const app = express();
@@ -74,6 +76,9 @@ app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ 
 
 // idempotent schema upgrade so new columns/tables exist without a manual migrate
 await exec(fs.readFileSync(fileURLToPath(new URL('../sql/schema.sql', import.meta.url)), 'utf8'));
+await seedProducts().catch((e) => console.error('products', e.message));
+startProductRefresh();
+startProductChecks(); // reads dynamiqes.com/products/ shortly after start, then every PRODUCT_CHECK_HOURS
 await backfillGolden().catch((e) => console.error('approved-answer backfill', e.message));
 await upgradePrompt().catch((e) => console.error('prompt upgrade', e.message));
 await invalidateSettings().catch((e) => console.error('settings', e.message));

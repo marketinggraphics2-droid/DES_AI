@@ -185,10 +185,13 @@ authRouter.post('/users/:id/password', wrap(async (req, res) => {
 // ---- audit log (superuser) ----
 authRouter.get('/audit', wrap(async (req, res) => {
   const limit = Math.min(500, parseInt(req.query.limit, 10) || 100), offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
-  const action = req.query.action ? String(req.query.action).slice(0, 60) + '%' : null, who = req.query.user ? '%' + String(req.query.user).slice(0, 80) + '%' : null;
-  const where = `($1::text is null or action like $1) and ($2::text is null or user_email ilike $2)`;
-  const rows = (await q(`select * from audit_log where ${where} order by id desc limit $3 offset $4`, [action, who, limit, offset])).rows;
-  const total = (await q(`select count(*)::int n from audit_log where ${where}`, [action, who])).rows[0].n;
+  // action: one or more prefixes, comma separated (e.g. "login.failed,login.locked,user.disabled"); user: part of an email; days: last N days
+  const prefixes = String(req.query.action || '').split(',').map((x) => x.trim().slice(0, 60)).filter(Boolean).slice(0, 20).map((x) => x + '%');
+  const action = prefixes.length ? prefixes : null, who = req.query.user ? '%' + String(req.query.user).slice(0, 80) + '%' : null;
+  const days = parseInt(req.query.days, 10) > 0 ? Math.min(3650, parseInt(req.query.days, 10)) : null;
+  const where = `($1::text[] is null or action like any($1)) and ($2::text is null or user_email ilike $2 or target ilike $2) and ($3::int is null or at > now() - make_interval(days => $3))`;
+  const rows = (await q(`select * from audit_log where ${where} order by id desc limit $4 offset $5`, [action, who, days, limit, offset])).rows;
+  const total = (await q(`select count(*)::int n from audit_log where ${where}`, [action, who, days])).rows[0].n;
   res.set('x-total-count', String(total)).json(rows);
 }));
 

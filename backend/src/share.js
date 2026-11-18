@@ -13,7 +13,8 @@ import { shareSummary } from './llm.js';
 
 const TTL = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, ...(cfg.testHooks ? { 'test-2s': 2 } : {}) }; // seconds
 const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
-const linkBase = (req) => cfg.publicUrl || `${req.protocol}://${req.get('host')}`;
+// The address the request came in on (works with any tunnel/domain); PUBLIC_URL only if the host is unknown.
+const linkBase = (req) => (req.get('host') ? `${req.protocol}://${req.get('host')}` : cfg.publicUrl);
 
 export const shareAdmin = Router();
 const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
@@ -126,7 +127,7 @@ export async function sharePage(req, res, next) {
     const phone = decrypt(c.phone), email = decrypt(c.email);
     const row = (k, v) => (v ? `<dt>${esc(k)}</dt><dd>${v}</dd>` : '');
     const thread = msgs.map((m) => {
-      if (m.role === 'tool') return m.tool_name === 'handoff_to_human' || m.tool_name === 'book_demo' ? `<div class="e">Passed to Sales</div>` : '';
+      if (m.role === 'tool') return m.tool_name === 'book_demo' ? `<div class="e">Demo requested</div>` : '';
       if (m.role === 'system') return `<div class="e">${esc(m.content)}</div>`;
       const cls = (m.role === 'user' ? 'u' : 'a') + (m.kind === 'script' ? ' s' : '');
       return `<div class="m ${cls}"><div class="b">${m.role === 'user' ? esc(m.content).replace(/\n/g, '<br>') : fmt(m.content)}</div><div class="t">${m.role === 'user' ? esc(c.name.split(' ')[0]) : 'DES'} · ${time(m.created_at)}</div></div>`;

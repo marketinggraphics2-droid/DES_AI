@@ -1,6 +1,6 @@
 /* DES — DynamIQ website chat widget · prototype v1 (2026-10-01)
  * Front-end only. Implements system-instruction.md §7.1 (in-chat onboarding),
- * §7.4 (survey + thumbs) and the "any issue → sales consultant" fallback.
+ * §7.4 (survey + thumbs) and the "any issue → Sales contact details" fallback.
  * The LLM is mocked (MOCK.reply). Swap `api.*` for real endpoints later.
  */
 (async function () {
@@ -54,10 +54,9 @@
       optIn: 'Would you also like occasional updates on DynamIQ products and events?',
       optYes: 'Yes please', optNo: 'No thanks',
       thanksGo: (n) => `Thanks, ${n}. `,
-      trouble: "Sorry — I'm having trouble with that one. Let me get a sales consultant to help you.",
-      connect: 'Connect to a consultant', keep: 'Keep chatting',
-      handoffDone: (c) => `Done — our team will reach you at the contact you gave within 24 hours (Mon–Fri, 8 AM–5 PM). You can also call <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or email <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
-      handoffNoContact: `Our consultants are at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> / <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a> (Mon–Fri, 8 AM–5 PM). Share a contact here and they'll call you instead.`,
+      trouble: `Sorry — I'm having trouble with that one. You can reach our sales team at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a> (Mon–Fri, 8 AM–5 PM).`,
+      contactSales: 'Contact Sales',
+      salesContact: `You can reach our sales team at <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> or <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a> (Mon–Fri, 8 AM–5 PM).`,
       surveyIntro: "If you have a moment, I'd love to hear how this went — it helps me get better. Or choose <b>Not now</b> to keep chatting.",
       surveyQ: 'On a scale of 1 to 5, where 1 is <i>not helpful at all</i> and 5 is <i>very helpful</i>, how would you rate this chat?',
       notNow: 'Not now',
@@ -104,10 +103,9 @@
       optIn: 'Gusto mo rin bang makatanggap ng updates tungkol sa DynamIQ products at events?',
       optYes: 'Oo, sige', optNo: 'Hindi na',
       thanksGo: (n) => `Salamat, ${n}. `,
-      trouble: 'Pasensya na — nahihirapan ako diyan. Ikokonekta kita sa isang sales consultant.',
-      connect: 'Kausapin ang consultant', keep: 'Magpatuloy sa chat',
-      handoffDone: () => `Sige — kokontakin ka ng team namin sa loob ng 24 oras (Lun–Biy, 8 AM–5 PM). Pwede ka ring tumawag sa <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a>.`,
-      handoffNoContact: `Nandito ang consultants namin: <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> / <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a>.`,
+      trouble: `Pasensya na — nahihirapan ako diyan. Maaabot mo ang sales team namin sa <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> o <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a> (Lun–Biy, 8 AM–5 PM).`,
+      contactSales: 'Kontakin ang Sales',
+      salesContact: `Maaabot mo ang sales team namin sa <a href="${CFG.salesPhoneHref}">${CFG.salesPhone}</a> o <a href="mailto:${CFG.salesEmail}">${CFG.salesEmail}</a> (Lun–Biy, 8 AM–5 PM).`,
       surveyIntro: 'Kung may oras ka, gusto kong malaman kung paano ito naging — nakakatulong ito para gumaling ako. O piliin ang <b>Hindi ngayon</b> para magpatuloy.',
       surveyQ: 'Sa scale na 1 hanggang 5, kung saan 1 ay <i>hindi nakatulong</i> at 5 ay <i>sobrang nakatulong</i>, paano mo ira-rate ang chat na ito?',
       notNow: 'Hindi ngayon',
@@ -220,7 +218,7 @@
   };
 
   // ---------- data capture (what the backend would receive) ----------
-  const data = { visitor: null, conversation: { id: 'c_' + Math.random().toString(36).slice(2, 9), lang: 'en', started_at: new Date().toISOString(), messages: [] }, lead: null, feedback: [], handoffs: [], events: [] };
+  const data = { visitor: null, conversation: { id: 'c_' + Math.random().toString(36).slice(2, 9), lang: 'en', started_at: new Date().toISOString(), messages: [] }, lead: null, feedback: [], events: [] };
   const emit = (type, payload) => { data.events.push({ type, at: new Date().toISOString(), ...payload }); window.dispatchEvent(new CustomEvent('des:data', { detail: data })); };
   // ---------- API: real backend when CFG.apiBase is set (?api=... or DES_CFG.apiBase); mock otherwise ----------
   // Backend: DES_CFG.apiBase / data-api, or ?api=…; when the page is served by the backend itself (/widget/…), use it automatically.
@@ -241,7 +239,7 @@
     }
     return stream ? r : r.json();
   };
-  /** Parse an SSE stream into {text, chips, handoff, handoffOffer, blocked} while calling onDelta. */
+  /** Parse an SSE stream into {text, contactOffer, blocked, …} while calling onDelta. */
   async function readSSE(res, onDelta, onEvent) {
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '', text = '', final = null, err = null;
     for (;;) {
@@ -259,15 +257,15 @@
       }
     }
     if (err) throw Object.assign(new Error(err.code), { code: err.code });
-    return { text: final?.text ?? text, blocked: final?.blocked || null, sources: final?.sources || [], handoffOffer: final?.blocked === 'trouble', message_id: final?.message_id ?? null, ended: !!final?.ended, until: final?.until || null };
+    return { agent: !!final?.agent, agentName: final?.agent_name || null, text: final?.text ?? text, blocked: final?.blocked || null, sources: final?.sources || [], message_id: final?.message_id ?? null, ended: !!final?.ended, until: final?.until || null };
   }
   const mockApi = {
     async session(v) { emit('session.create', { visitor: v }); return { session_id: 's_' + Date.now() }; },
     async chat(msg) { return MOCK.reply(msg, data); },
     async saveLead(l) { data.lead = { ...(data.lead || {}), ...l, updated_at: new Date().toISOString() }; emit('lead.save', { lead: data.lead }); },
-    async handoff(reason) { const h = { reason, at: new Date().toISOString(), phone: data.visitor?.phone || null }; data.handoffs.push(h); emit('handoff', h); },
     async feedback(f) { data.feedback.push({ ...f, at: new Date().toISOString() }); emit('feedback', f); },
-    async end() { }
+    async end() { },
+    async updates() { return { cursor: 0, agent: null, items: [] }; }
   };
   const realApi = {
     async session(v) {
@@ -284,11 +282,11 @@
     async chat(msg, { held, prefix, signal } = {}) {
       await flushLog();
       const res = await http('/chat', { message: msg, ...(held ? { held: true, prefix } : {}) }, { stream: true, signal });
-      const out = await readSSE(res, null, (ev) => { if (ev.type === 'lead') { data.lead = { ...(data.lead || {}), product_interest: ev.product_interest }; emit('lead.save', { lead: data.lead }); } if (ev.type === 'handoff') { data.handoffs.push({ reason: ev.reason, at: new Date().toISOString() }); emit('handoff', ev); } });
-      return { ended: out.ended, until: out.until, message_id: out.message_id, text: fmt(out.text), handoffOffer: out.blocked === 'trouble' || out.blocked?.includes?.('claim'), blocked: out.blocked };
+      const out = await readSSE(res, null, (ev) => { if (ev.type === 'lead') { data.lead = { ...(data.lead || {}), product_interest: ev.product_interest }; emit('lead.save', { lead: data.lead }); } });
+      return { agent: out.agent, agentName: out.agentName, ended: out.ended, until: out.until, message_id: out.message_id, text: fmt(out.text), contactOffer: out.blocked?.includes?.('claim'), blocked: out.blocked };
     },
     async saveLead() { },
-    async handoff(reason) { await flushLog(); await http('/handoff', { reason }); data.handoffs.push({ reason, at: new Date().toISOString() }); emit('handoff', { reason }); },
+    async updates(after) { return http('/updates', { after }); },
     async feedback(f) { await http('/feedback', f); data.feedback.push({ ...f, at: new Date().toISOString() }); emit('feedback', f); },
     async end() { try { await flushLog(); await http('/end', {}); } catch { } }
   };
@@ -329,18 +327,18 @@
       const n = d.visitor?.first || '';
       const lead = (p, need) => api.saveLead({ product_interest: p, need });
       if (/\/fail/.test(q)) return Promise.reject(new Error('simulated LLM error'));
-      if (/price|pricing|cost|magkano|how much|rate card|quote/.test(q)) { lead(['SAP Business One'], 'asked about pricing'); return Promise.resolve({ text: "I can't give pricing here — every setup is scoped to the business (users, cloud or on-site, which modules, add-ons). The quickest way is a free business analysis: our consultant looks at how you work now and sends a tailored proposal within 24 hours.<p>Want me to line that up?</p>", chips: ['Yes, book a free business analysis', 'Tell me more first'], handoffHint: true }); }
+      if (/price|pricing|cost|magkano|how much|rate card|quote/.test(q)) { lead(['SAP Business One'], 'asked about pricing'); return Promise.resolve({ text: "I can't give pricing here — every setup is scoped to the business (users, cloud or on-site, which modules, add-ons). The quickest way is a free business analysis: our consultant looks at how you work now and sends a tailored proposal within 24 hours.<p>Want me to line that up?</p>", chips: ['Yes, book a free business analysis', 'Tell me more first'] }); }
       if (/bir|cas|tax|ebir|alphalist|2550|2307/.test(q)) { lead(['IQ Tax', 'SAP Business One'], 'BIR CAS / tax compliance'); return Promise.resolve({ text: "Yes — this is one of the things we do most.<p>In plain terms: a <b>CAS</b> (Computerized Accounting System) is just the BIR's name for accounting software whose books and forms they've checked and approved. Large taxpayers are required to have one; many smaller companies register too so they can issue e-invoices.</p><p>Our <b>IQ Tax</b> add-on sits inside SAP Business One and fills BIR forms (2550Q, 1601-EQ, 2307…) straight from your books — no re-typing into eBIRForms. We also walk you through the BIR application, including the mock demo.</p><p>Has the BIR already tagged you as a large taxpayer, or are you preparing ahead?</p>", chips: ['BIR already notified us', 'Preparing ahead', 'Talk to a consultant'] }); }
       if (/payroll|hr|sss|philhealth|pag-?ibig|timekeeping|attendance|employee/.test(q)) { lead(['IQ People'], 'HR / payroll'); return Promise.resolve({ text: "That's <b>IQ People</b> — our HR and payroll system built for the Philippines.<p>Think of it as one place for your 201 files, time-in/time-out (even by phone with GPS), leave, and payroll. It computes SSS, PhilHealth, Pag-IBIG and tax, and produces the BIR alphalist and bank payroll file. Employees get payslips and file leave from an app, so HR stops answering the same questions.</p><p>Roughly how many employees are you running payroll for?</p>", chips: ['Under 50', '50–200', 'Over 200'] }); }
       if (/ecom|e-commerce|online store|shopee|lazada|tiktok|website orders/.test(q)) { lead(['IQ Ecom', 'IQ Link'], 'e-commerce / marketplaces'); return Promise.resolve({ text: "Two options, depending on what you sell online:<ul><li><b>IQ Ecom</b> — your own B2B/B2C online store that's wired to SAP Business One. Dealers log in and see <i>their</i> agreed prices; orders drop straight into SAP, no re-encoding.</li><li><b>IQ Link</b> — the \"translator\" that syncs Shopee, Lazada and TikTok Shop orders and stock with SAP.</li></ul><p>Are you selling mostly to resellers/dealers, or to the public on marketplaces?</p>", chips: ['Resellers / dealers', 'Marketplaces', 'Both'] }); }
       if (/barcode|scan|warehouse|inventory count|stock count/.test(q)) { lead(['IQ Barcode'], 'warehouse / barcode'); return Promise.resolve({ text: "<b>IQ Barcode</b> puts a scanner (a Zebra gun or just an Android phone) in your warehouse staff's hands. Receiving, picking, transfers and stock counts are scanned instead of written down, and SAP Business One updates in real time — so the stock on the report is the stock on the shelf. Works with batch and expiry tracking too (food, pharma).<p>Typical setup is 2–4 weeks. How many warehouses or branches hold stock?</p>", chips: ['One location', 'Several branches', 'Talk to a consultant'] }); }
       if (/integrat|connect|pos|sync|link|api/.test(q)) { lead(['IQ Link'], 'integration'); return Promise.resolve({ text: "<b>IQ Link</b> is our connector. If your POS, bank, e-commerce or another system needs to \"talk\" to SAP Business One, IQ Link moves the data on a schedule or in real time, checks it, and shows a status report if anything doesn't match. No per-transaction fees.<p>Which system are you hoping to connect?</p>", chips: ['POS', 'E-commerce', 'Another ERP / database'] }); }
       if (/sap|erp|accounting system|quickbooks|peachtree|excel|spreadsheet|which product|fit|recommend|aling product/.test(q)) { lead(['SAP Business One'], 'ERP / core system'); return Promise.resolve({ text: "<b>SAP Business One</b> is the core. The simplest way to picture it: one ledger that your sales, warehouse, purchasing and accounting all write in at the same time — so nobody re-encodes, and the owner sees real numbers today, not at month-end. It's built for small and mid-size companies, runs in the cloud or on your own server, and is BIR CAS-ready.<p>Most clients go live in 3–6 months. What are you using today — Excel, QuickBooks, or another system?</p>", chips: ['Excel / manual', 'QuickBooks / Peachtree', 'Another ERP'] }); }
-      if (/demo|analysis|book|schedule|consult|talk to|agent|human|kausapin/.test(q)) { lead(null, 'requested demo / consultant'); return Promise.resolve({ handoff: 'visitor', text: n ? `Great, ${n}. ` : '' }); }
+      if (/demo|analysis|book|schedule|consult|talk to|agent|human|kausapin/.test(q)) { lead(null, 'requested demo / consultant'); return Promise.resolve({ text: (n ? `Great, ${n}. ` : '') + S.t.salesContact }); }
       if (/job|career|hiring|apply|resume|cv|work for/.test(q)) return Promise.resolve({ text: `We're hiring SAP Business One consultants, helpdesk and sales roles in Metro Manila and Cebu. Send your CV and the position to <a href="mailto:hr@dynamiqes.com">hr@dynamiqes.com</a> or call +63 917 703 2701. Openings: <a href="https://dynamiqes.com/career/" target="_blank" rel="noopener">dynamiqes.com/career</a>.` });
       if (/who are you|what is dynamiq|about/.test(q)) return Promise.resolve({ text: "DynamIQ is a Filipino IT consultancy and SAP Premier Partner based in Quezon City. We implement SAP Business One for small and mid-size companies and build the IQ Suite of add-ons around it — tax, HR, e-commerce, barcoding, integration and more. Clients include MacroAsia, Presline Steel and Bridgestone's PH distributor.<p>What does your business do?</p>" });
-      // unknown → default to human
-      return Promise.resolve({ text: "I'm not sure I have a good answer for that one, and I'd rather not guess.", handoffOffer: true });
+      // unknown → offer the Sales contact
+      return Promise.resolve({ text: "I'm not sure I have a good answer for that one, and I'd rather not guess.", contactOffer: true });
     }
   };
 
@@ -356,11 +354,11 @@
   const head = $('.dq-chat__head', root);
 
   // header menu
-  const menu = el('div', 'dq-chat__menu', `<button type="button" aria-label="Menu" aria-haspopup="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button><ul role="menu"><li><button type="button" data-act="handoff">Connect to a consultant</button></li><li><button type="button" data-act="notice">Privacy Notice</button></li><li><button type="button" data-act="reset">Not you? Start over</button></li></ul>`);
+  const menu = el('div', 'dq-chat__menu', `<button type="button" aria-label="Menu" aria-haspopup="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button><ul role="menu"><li><button type="button" data-act="contact">Contact Sales</button></li><li><button type="button" data-act="notice">Privacy Notice</button></li><li><button type="button" data-act="reset">Not you? Start over</button></li></ul>`);
   head.insertBefore(menu, closeLbl);
   menu.querySelector(':scope > button').addEventListener('click', e => { e.stopPropagation(); menu.classList.toggle('is-open'); });
   document.addEventListener('click', () => menu.classList.remove('is-open'));
-  menu.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => { menu.classList.remove('is-open'); ({ handoff: () => handoff('visitor'), notice: () => showNotice(), reset: () => reset() })[b.dataset.act](); }));
+  menu.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => { menu.classList.remove('is-open'); ({ contact: () => showSalesContact(), notice: () => showNotice(), reset: () => reset() })[b.dataset.act](); }));
 
   input.disabled = false; sendBtn.disabled = false;
   input.placeholder = 'Type your message…';
@@ -416,6 +414,7 @@
 
   function setLang(l) { S.lang = l; S.t = T[l]; data.conversation.lang = l; }
   function setStatus() {
+    if (S.agent) { statusEl.className = 'dq-chat__status is-named is-agent'; statusEl.innerHTML = `<i aria-hidden="true"></i>Chatting with ${esc(S.agent)} from DynamIQ`; return; }
     if (data.visitor) { statusEl.className = 'dq-chat__status is-named'; statusEl.innerHTML = `<i aria-hidden="true"></i>Chatting as ${esc(data.visitor.first)} · <button type="button">Not you?</button>`; statusEl.querySelector('button').onclick = reset; }
     else { statusEl.className = 'dq-chat__status'; statusEl.innerHTML = '<i aria-hidden="true"></i>Online · replies in minutes'; }
     if (!apiBase) statusEl.insertAdjacentHTML('beforeend', ' · <b title="Not connected to the DES backend: answers are canned and nothing is saved.">Demo mode</b>');
@@ -430,6 +429,10 @@
     body.append(m); scroll(); data.conversation.messages.push({ role: 'user', text, at: new Date().toISOString() });
     if (log) logItem('user', typeof log === 'string' ? log : text, held ? { held: true } : null);
     return m;
+  }
+  function addAgent(name, text) {
+    const m = el('div', 'dq-chat__msg is-bot is-agent', `<span class="dq-chat__mini dq-chat__agent" aria-hidden="true">${esc(String(name || '?')[0])}</span><div class="dq-chat__bubble"><b class="dq-chat__who">${esc(name || 'DynamIQ')} · DynamIQ</b>${esc(text).replace(/\n/g, '<br>')}<time>${now()}</time></div>`);
+    body.append(m); scroll(); data.conversation.messages.push({ role: 'agent', author: name, text, at: new Date().toISOString() });
   }
   function addSystem(text) { body.append(el('div', 'dq-chat__msg is-system', `<div class="dq-chat__bubble">${text}</div>`)); scroll(); }
   let typingEl = null;
@@ -554,7 +557,7 @@
       if (code === 'chat_ended') { data.visitor = null; await addBot(S.t.endedNotice(untilText(e.body?.until))); return endChat(e.body?.until); }
       emit('error', { message: 'session: ' + (code || e.message) });
       data.visitor = null; S.step = 'phone'; updatePlaceholder();
-      return addBot(S.t.trouble, { chips: [{ label: S.t.connect, cls: 'is-primary', on: () => handoff('system', 'session failed: ' + (code || e.message)) }] });
+      return addBot(S.t.trouble);
     }
     if (j && j.phone) Object.assign(data.visitor, { name: j.name || data.visitor.name, first: j.first_name || data.visitor.first, last: j.last_name ?? data.visitor.last, phone: j.phone, phone_type: j.phone_type });
     S.step = 'done';
@@ -573,11 +576,11 @@
     try {
       // after 20 s give up and cancel the request, so the server records the reply as not delivered
       const r = await Promise.race([api.chat(text, { held, prefix, signal: ac?.signal }), sleep(20000).then(() => { ac?.abort(); throw new Error('timeout'); })]);
+      if (r.agent) { if (r.agentName && S.agent !== r.agentName) { S.agent = r.agentName; setStatus(); } return; } // a person from the team answers
       S.botAnswers++;
-      if (r.handoff) { await addBot((prefix || r.text || '') + (S.lang === 'fil' ? 'Ikokonekta kita sa isang sales consultant.' : "I'll connect you with one of our sales consultants."), { time: false }); return handoff(r.handoff); }
       const id = r.message_id ?? ('m_' + Date.now()); // numeric id from the server links thumbs to this reply
       const chips = (r.chips || []).map(l => ({ label: l, sends: true, on: (lab) => send(lab) }));
-      if (r.handoffOffer) chips.push({ label: S.t.connect, cls: 'is-primary', on: () => handoff('model') });
+      if (r.contactOffer) chips.push({ label: S.t.contactSales, cls: 'is-primary', on: () => showSalesContact() });
       if (r.ended) { await addBot(prefix + r.text, { time: true, serverStored: !!apiBase }); return endChat(r.until); }
       await addBot(prefix + r.text, { chips: chips.length ? chips : null, feedback: !r.blocked, id, serverStored: !!apiBase });
       if (chips.length) body.lastElementChild.querySelector('.dq-chat__bubble').append(el('time', null, now()));
@@ -594,13 +597,10 @@
     finally { setBusy(false); input.focus(); }
   }
   async function trouble(reason) {
-    await addBot(S.t.trouble, { lock: true, chips: [{ label: S.t.connect, cls: 'is-primary', on: () => handoff('system', reason) }, { label: S.t.keep, cls: 'is-quiet', on: () => { } }] });
+    await addBot(S.t.trouble);
   }
-  async function handoff(kind, reason) {
-    await api.handoff(reason ? `${kind}: ${reason}` : kind);
-    await addBot(data.visitor?.phone ? S.t.handoffDone(data.visitor.phone) : S.t.handoffNoContact);
-    if (!S.surveyDone) { await sleep(600); survey('handoff'); }
-  }
+  /** "Contact Sales": show the sales team's phone and email (nothing is sent to Sales). */
+  async function showSalesContact() { await addBot(S.t.salesContact); }
 
   // ---------- survey ----------
   async function survey(trigger) {
@@ -609,7 +609,7 @@
     const t = S.t, fb = { kind: 'survey', trigger };
     await addBot(t.surveyIntro, { time: false });
     await addBot(t.surveyQ, { lock: true, chipsCls: 'is-rating', chips: [1, 2, 3, 4, 5].map(n => ({ label: String(n), on: () => rated(n) })) });
-    const tail = await addBot('', { time: false, lock: true, chips: [{ label: t.notNow, cls: 'is-quiet', on: () => { S.surveyOpen = false; S.surveyDone = true; api.feedback({ ...fb, rating: null, dismissed: true }); closeIfRequested(); } }, { label: t.connect, on: () => { S.surveyOpen = false; S.surveyDone = true; handoff('survey'); } }], chipsCls: 'is-inline' });
+    const tail = await addBot('', { time: false, lock: true, chips: [{ label: t.notNow, cls: 'is-quiet', on: () => { S.surveyOpen = false; S.surveyDone = true; api.feedback({ ...fb, rating: null, dismissed: true }); closeIfRequested(); } }], chipsCls: 'is-inline' });
     tail.querySelector('.dq-chat__bubble').style.paddingTop = '6px';
     async function rated(n) {
       fb.rating = n; tail.querySelector('.dq-chat__chips').classList.add('is-done');
@@ -726,7 +726,28 @@
       emit('auto_open', {});
     }, CFG.autoOpenMs);
   }
-  toggle.addEventListener('change', () => ssSet('autoOpened', '1')); // opened or closed by hand: don't auto-open again this session
+  toggle.addEventListener('change', () => ssSet('autoOpened', '1'));
+
+  // ---------- live takeover: someone from the team can join the chat; DES is silent while they do ----------
+  let cursor = null, pollTimer = null;
+  async function pollUpdates() {
+    clearTimeout(pollTimer);
+    if (apiBase && token && toggle.checked && document.visibilityState !== 'hidden' && !S.ended) {
+      try {
+        const u = await api.updates(cursor);
+        if (cursor !== null) for (const it of u.items || []) {
+          if (it.role === 'assistant') addAgent(it.author, it.content);
+          else addSystem(esc(it.content));
+        }
+        cursor = u.cursor ?? cursor;
+        if ((u.agent || null) !== (S.agent || null)) { S.agent = u.agent || null; setStatus(); }
+      } catch { /* offline for a moment: try again on the next tick */ }
+    }
+    pollTimer = setTimeout(pollUpdates, S.agent ? 2500 : 5000);
+  }
+  toggle.addEventListener('change', () => { if (toggle.checked) pollUpdates(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollUpdates(); });
+  pollUpdates(); // opened or closed by hand: don't auto-open again this session
   window.DES = { data, send, survey: () => survey('manual'), reset, trouble: () => trouble('manual') };
   emit('boot', {});
 })();

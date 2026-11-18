@@ -6,7 +6,7 @@ import { maskPII } from './guardrails.js';
 import { publish, touch } from './events.js';
 
 const COLS = ['role', 'content', 'kind', 'tool_name', 'tool_input', 'tool_output', 'tokens_in', 'tokens_out', 'cache_read', 'cost_usd', 'blocked_reason',
-  'product', 'golden_ids', 'incomplete', 'delivered', 'original_content', 'source', 'held'];
+  'product', 'golden_ids', 'incomplete', 'delivered', 'original_content', 'source', 'held', 'author'];
 
 /** Insert one message with the next sequence number. Returns {id, seq}. */
 export async function addMessage(conversationId, row) {
@@ -19,7 +19,7 @@ export async function addMessage(conversationId, row) {
   // live dashboard: the new row as the conversation view shows it
   touch(conversationId);
   publish('message.new', { conversation_id: conversationId, id, seq, created_at: r.rows[0].created_at, kind: row.kind || 'chat',
-    ...Object.fromEntries(['role', 'content', 'tool_name', 'blocked_reason', 'product', 'golden_ids', 'incomplete', 'delivered', 'original_content', 'source', 'tokens_in', 'tokens_out', 'cost_usd'].map((k) => [k, row[k] ?? null])) });
+    ...Object.fromEntries(['role', 'content', 'tool_name', 'blocked_reason', 'product', 'golden_ids', 'incomplete', 'delivered', 'original_content', 'source', 'tokens_in', 'tokens_out', 'cost_usd', 'author'].map((k) => [k, row[k] ?? null])) });
   return { id, seq };
 }
 
@@ -43,7 +43,7 @@ export function serialize(conversationId, fn) {
 
 // Text the widget logs (sign-up replies, survey comments…): card / ID numbers masked like chat messages, and the
 // contact details typed during sign-up replaced, because contact details live only in the visitors table.
-// keep: DynamIQ's own contacts (normalised, as in routes.js) — shown in handoff / help bubbles, so they stay readable.
+// keep: DynamIQ's own contacts (normalised, as in routes.js) — shown in Sales-contact / help bubbles, so they stay readable.
 const EMAIL = /[^\s@<>()"',;]+@[^\s@<>()"',;]+\.[a-z]{2,}/gi;
 const PHONE = /(?:\+|\b00)?\d[\d\s().-]{6,}\d/g;
 export function maskWidgetText(text, keep = []) {
@@ -51,4 +51,13 @@ export function maskWidgetText(text, keep = []) {
   return maskPII(String(text || '')).text
     .replace(EMAIL, (m) => (own(m) ? m : '[email]'))
     .replace(PHONE, (m) => (m.replace(/\D/g, '').length < 7 || own(m) ? m : '[phone]'));
+}
+
+/** Live takeover ends: DES answers again. The visitor sees "DES is back to help"; the dashboard updates live. */
+export async function handBack(conversationId) {
+  const r = await q('update conversations set agent_id=null, agent_name=null, agent_last_at=null where id=$1 and agent_id is not null returning id', [conversationId]);
+  if (!r.rowCount) return false;
+  await addMessage(conversationId, { role: 'system', kind: 'event', source: 'agent', content: 'DES is back to help' });
+  publish('conversation.update', { id: conversationId, agent_id: null, agent_name: null });
+  return true;
 }

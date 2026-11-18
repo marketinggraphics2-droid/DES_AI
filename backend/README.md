@@ -13,7 +13,7 @@ npm run ingest                  # seeds the KB from "reference/website-scrape-20
 npm run dev                     # http://localhost:8787/api/health
 ```
 
-Then open the widget prototype with `?api=http://localhost:8787/api` (or set `window.DES_CFG.apiBase`) — onboarding, chat, survey and handoff now hit the real API. In MOCK mode replies are built from retrieved chunks and prefixed `[MOCK]`.
+Then open the widget prototype with `?api=http://localhost:8787/api` (or set `window.DES_CFG.apiBase`) — onboarding, chat and survey now hit the real API. In MOCK mode replies are built from retrieved chunks and prefixed `[MOCK]`.
 
 Switch on the real model: set `IQ_GATEWAY_KEY` (a `gws_…` key from IQLicense → API keys, bound to this client + product wallet) (and `EMBEDDINGS_PROVIDER=voyage` + `VOYAGE_API_KEY` for proper retrieval), restart, re-run `npm run ingest` once so chunks are re-embedded.
 
@@ -29,9 +29,9 @@ npm run user:create -- --role superuser --email you@dynamiqes.com --name "Your N
 
 After that, a superuser adds people in **Users**. Roles: **Superuser** (everything, incl. users, DES instructions, audit log, system settings, deleting visitor data), **Admin** (everything except those), **User** (overview, conversations and leads with phone and email, remarks, share links; no exports or settings, e.g. for the telemarketer). The table is in `src/permissions.js`. Five wrong passwords lock an account for 15 minutes. `npm run user:reset-password -- --email …` resets a password from the command line. `ADMIN_TOKEN` is now only the machine token `npm run stop` uses.
 
-- **Overview**: chats, questions, leads, handoffs, ratings, approved-answer use, AI cost, questions per day, product interest, activity feed.
+- **Overview**: chats, questions, leads, ratings, approved-answer use, AI cost, questions per day, product interest, activity feed.
 - **Conversations / Leads**: transcripts with tool calls, guardrail changes and feedback; lead status; CSV export; visitor data erasure.
-- **Fine-tune answers** (per product): approved answers (question, variations, answer, live toggle), product notes, visitor questions with 👍/👎, the product's website pages, and a test box (`POST /api/admin/test`, real model, no tools, nothing saved).
+- **Fine-tune answers** (per product; the product list comes from the website's `/products/` pages, new ones marked "New" until someone checks the name and nicknames on the **Details** tab): approved answers (question, variations, answer, live toggle), product notes, visitor questions with 👍/👎, the product's website pages, and a test box (`POST /api/admin/test`, real model, no tools, nothing saved).
 - **Needs review**: thumbs-down replies to turn into approved answers.
 - **Website knowledge / Settings**: pause or re-read pages, facts, glossary, bot instructions.
 
@@ -56,19 +56,18 @@ The local database (PGlite) is a folder of files and a hard kill can corrupt it.
 | GET | `/api/health` | – | status, mock flag, today's budget |
 | POST | `/api/session` | Turnstile | after in-chat onboarding → `visitors` + `conversations`, returns JWT (2 h) |
 | POST | `/api/session/resume` | JWT | returning visitor → new conversation |
-| POST | `/api/chat` | JWT | SSE: `text` deltas, `event` (lead / handoff), `replace` (guardrail swapped the reply), `done`, `error` |
+| POST | `/api/chat` | JWT | SSE: `text` deltas, `event` (lead / demo), `replace` (guardrail swapped the reply), `done`, `error` |
 | POST | `/api/feedback` | JWT | survey / thumbs |
-| POST | `/api/handoff` | JWT | visitor-initiated "Connect to a consultant" |
 | POST | `/api/end` | JWT | close + one-line summary |
 | POST | `/api/ingest/webhook` | HMAC `x-des-signature` | WordPress publish/update/trash → re-ingest one URL |
 | GET | `/api/admin/leads` · `/admin/conversations/:id` · `/admin/feedback/summary` · `/admin/review-queue` · `/admin/kb` | signed-in user (role) | admin data |
 | POST | `/api/admin/golden` · `/admin/ingest` · `/admin/prompt` · PUT `/admin/facts/:key` · DELETE `/admin/visitors/:id` | signed-in user (role) | review queue, re-ingest, prompt version, facts, DPA erasure |
 | GET | `/api/admin/export/leads.csv` · `/admin/export/finetune.jsonl` | signed-in user (role) | exports |
-| GET/POST/PUT/DELETE | `/api/admin/overview` · `/activity` · `/conversations` · `/conversations/:id/detail` · `/products` · `/products/:name` · `/products/:name/notes` · `/golden` · `/golden/:id` · `/match` · `/test` · `/kb/:id` · `/facts` · `/glossary` · `/prompt` · `/status` · `/leads/:id` | `ADMIN_TOKEN` | dashboard API (`src/admin.js`) |
+| GET/POST/PUT/DELETE | `/api/admin/overview` · `/activity` · `/conversations` · `/conversations/:id/detail` · `/products` · `/products/:name` · `/products/:name/notes` · PUT `/products/:name` (name, nicknames, page, on/off) · `/golden` · `/golden/:id` · `/match` · `/test` · `/kb/:id` · `/facts` · `/glossary` · `/prompt` · `/status` · `/leads/:id` | `ADMIN_TOKEN` | dashboard API (`src/admin.js`) |
 
 ## Request flow (`/api/chat`)
 
-rate limit → PII mask → injection screen → regex topic classifier → budget check → hybrid retrieval (pgvector + tsvector, product filter) → system prompt (cached) + `<facts>/<kb>/<lang>` context → Claude with tools (`save_lead`, `book_demo`, `handoff_to_human`, `search_kb`, `get_open_jobs`) → output filters (price, claims, links, format, leak) → log + cost meter. Any exception → automatic handoff + `error` event; the widget shows "Connect to a consultant".
+rate limit → PII mask → injection screen → regex topic classifier → budget check → hybrid retrieval (pgvector + tsvector, product filter) → system prompt (cached) + `<facts>/<kb>/<lang>` context → Claude with tools (`save_lead`, `book_demo`, `search_kb`, `get_open_jobs`) → output filters (price, claims, links, format, leak) → log + cost meter. Any exception → `error` event; the widget shows the sales team's phone and email.
 
 ## Model (via IQGateway)
 
@@ -90,4 +89,4 @@ All AI calls go through IQGateway (`IQ_GATEWAY_URL`, default `https://iqlicense.
 
 ## Not done yet
 
-Google SSO on `/admin` (bearer token for now), admin UI pages, Turnstile widget key wiring on the front end, Teams/Viber handoff webhook, production Dockerfile hardening, tests.
+Google SSO on `/admin` (bearer token for now), admin UI pages, Turnstile widget key wiring on the front end, production Dockerfile hardening, tests.

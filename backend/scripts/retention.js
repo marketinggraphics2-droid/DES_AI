@@ -4,7 +4,7 @@ import { cfg } from '../src/config.js';
 import { pool, q } from '../src/db.js';
 
 const del = await q(`delete from visitors v where v.created_at < now() - ($1 || ' months')::interval
-  and not exists (select 1 from leads l where l.visitor_id = v.id and l.status in ('contacted','qualified'))`, [String(cfg.retentionMonths)]);
+  and not exists (select 1 from leads l where l.visitor_id = v.id and l.status in ('contacted','call_again','qualified'))`, [String(cfg.retentionMonths)]);
 await q(`update visitors set ip_hash = null where ip_hash is not null and created_at < now() - interval '7 days'`);
 await q(`delete from rate_events where at < now() - interval '2 days'`);
 console.log('retention: removed', del.rowCount, 'visitors');

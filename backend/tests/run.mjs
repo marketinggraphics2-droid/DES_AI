@@ -27,7 +27,7 @@ if (want('rules')) await guard('rules', async () => {
     ['1234567', 'bad_phone'], ['skip', 'bad_phone'], ['n/a', 'bad_phone'], ['0917', 'bad_phone'], ['', 'phone_required'], ['juan.delacruz@gmail.com', 'phone_not_email'],
     ['telegram @juan_dc', 'phone_needs_number'], ['line: juandc', 'phone_needs_number'], ['wechat juan_88', 'phone_needs_number']];
   for (const [c, code] of bad) { const r = validatePhone(c); ok(`mobile no. rejected: ${JSON.stringify(c)} → ${code}`, !r.ok && r.code === code, JSON.stringify(r)); }
-  // email is optional at sign-up (asked later in the demo / handoff form); the server still checks it when given
+  // email is optional at sign-up (asked later in the demo form); the server still checks it when given
   for (const [c, type] of [['', null], ['mark.sagaad@dynamiqes.com', 'work_email'], ['juan.delacruz@gmail.com', 'email']]) { const r = await validateEmail(c); ok(`email accepted: ${JSON.stringify(c)}`, r.ok && r.type === type, JSON.stringify(r)); }
   for (const [c, code] of [['juan@', 'bad_email'], ['test@test.com', 'fake_email'], ['asdf@gmail.com', 'fake_email'], ['me@example.com', 'fake_email'], ['noemail@yahoo.com', 'fake_email'],
     ['juan@mailinator.com', 'disposable_email'], ['juan@nonexistent-domain-zz91x.com', 'email_domain']]) { const r = await validateEmail(c); ok(`email rejected: ${JSON.stringify(c)} → ${code}`, !r.ok && r.code === code, JSON.stringify(r)); }
@@ -209,7 +209,7 @@ if (want('auth')) await guard('auth', async () => {
 });
 
 // =====================================================================================
-sec('8. Feedback, review queue, handoff, summary');
+sec('8. Feedback, review queue, hand-off removed, summary');
 if (want('feedback')) await guard('feedback', async () => {
   const id = ident(); const s = await A.session(id);
   const c = await A.chat(s.token, 'What is IQ Barcode?', id); const mid = c.done?.message_id;
@@ -221,11 +221,10 @@ if (want('feedback')) await guard('feedback', async () => {
   ok('disliked answer appears in Needs review with question + reason', !!item && item.question === 'What is IQ Barcode?' && (item.reasons || []).includes('Not accurate'), JSON.stringify(item?.reasons));
   r = await A.req('POST', '/api/feedback', { body: { kind: 'survey', rating: 4, resolved: 'yes' }, token: s.token, id }); ok('survey accepted', r.status === 200);
   const sum = (await A.req('GET', '/api/admin/feedback/summary', { admin: true })).json; ok('survey counted in summary', sum.surveys >= 1 && Number(sum.avg_rating) > 0);
-  r = await A.req('POST', '/api/handoff', { body: { reason: 'visitor asked for a consultant' }, token: s.token, id }); ok('handoff accepted', r.status === 200);
-  r = await A.req('POST', '/api/handoff', { body: { reason: 'asked again' }, token: s.token, id }); ok('second handoff in the same chat: no second record or Sales email', r.json?.already === true, r.text);
+  r = await A.req('POST', '/api/handoff', { body: { reason: 'visitor asked for a consultant' }, token: s.token, id }); ok('hand-to-Sales endpoint is gone', r.status === 404, String(r.status));
   r = await A.req('POST', '/api/end', { body: {}, token: s.token, id }); ok('chat end accepted', r.status === 200);
   const det = (await A.req('GET', `/api/admin/conversations/${s.json.session_id}/detail`, { admin: true })).json;
-  ok('handoff recorded, status "handed to sales"', det.status === 'handed_off' && det.handoffs.length >= 1, det.status);
+  ok('chat closes normally (no "handed to sales" status)', det.status === 'closed' && !('handoffs' in det), det.status);
   ok('AI wrote a one-line summary at the end', !!det.summary && det.summary.length > 10, det.summary);
 });
 
@@ -289,7 +288,7 @@ if (want('capture')) await guard('capture', async () => {
   d = await detail(cid);
   ok('held question answered without a duplicate user row', d.messages.filter((m) => m.role === 'user' && m.content === 'Do you handle BIR CAS?').length === 1 && !!c.done, d.messages.length);
   ok('stored reply includes the greeting the visitor saw', d.messages.filter((m) => m.role === 'assistant').at(-1)?.content.startsWith('Thanks, Ana.'));
-  // widget-only bubbles (survey, trouble, handoff confirmation…) are logged
+  // widget-only bubbles (survey, trouble, Sales contact…) are logged
   let r = await A.req('POST', '/api/log', { token: s.token, id, body: { items: [{ role: 'assistant', content: 'If you have a moment, I’d love to hear how this went.' }, { role: 'user', content: 'call me at 0917 555 0132 or ana@acme.ph' }, { role: 'assistant', content: 'Thanks, Ana!' }] } });
   ok('widget bubbles accepted by /api/log', r.status === 200, r.text);
   d = await detail(cid);
@@ -391,6 +390,123 @@ if (want('retrieval')) await guard('retrieval', async () => {
 });
 
 // =====================================================================================
+sec('9e. Products come from the website (new product page → new product; rename, nicknames, off, page gone)');
+if (want('products')) await guard('products', async () => {
+  const http = await import('node:http');
+  let pageUp = true;
+  const site = http.createServer((req, res) => {
+    if (pageUp && req.url === '/products/iq-fleet-test/') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html><head><title>SAP B1 Fleet Tracking Module | Real-time GPS - DynamIQ</title></head><body><main><h2>Fleet tracking for SAP Business One</h2><p>Track every delivery truck live on a map, with GPS trip history, fuel logs and driver assignments posted straight to SAP B1 delivery documents.</p></main></body></html>'); }
+    else { res.writeHead(404); res.end(); }
+  });
+  await new Promise((ok) => site.listen(0, '127.0.0.1', ok));
+  const pageUrl = `http://127.0.0.1:${site.address().port}/products/iq-fleet-test/`;
+  const products = async () => (await A.req('GET', '/api/admin/products', { admin: true })).json;
+  const live = async () => (await A.req('GET', '/api/admin/status', { admin: true })).json.products;
+  const detect = async (question) => (await A.req('POST', '/api/admin/match', { admin: true, body: { question } })).json.product;
+  try {
+    let list = await products();
+    ok('the 12 original products are filled in, with their pages', list.filter((p) => p.product !== 'General').length >= 12 && /\/products\/sap-business-one-philippines\/$/.test(list.find((p) => p.product === 'SAP Business One')?.url || ''));
+    ok('nicknames carried over (payroll → IQ People)', await detect('do you have payroll software?') === 'IQ People');
+
+    let r = await A.req('POST', '/api/admin/ingest', { admin: true, body: { url: pageUrl } });
+    ok('a new product page is read', r.status === 200 && r.json.action === 'created', JSON.stringify(r.json));
+    list = await products();
+    const added = list.find((p) => p.needs_review);
+    ok('it becomes a new product, named from the page title and flagged for review', added?.product === 'SAP B1 Fleet Tracking Module' && added.needs_review === true && added.live === true, JSON.stringify(added));
+    ok('DES can name it right away', (await live()).includes('SAP B1 Fleet Tracking Module'));
+    ok('its page is tagged with it', (await A.req('GET', '/api/admin/products/' + encodeURIComponent('SAP B1 Fleet Tracking Module'), { admin: true })).json.docs.length === 1);
+    ok('questions naming it are recognised', await detect('Does the SAP B1 Fleet Tracking Module show trip history?') === 'SAP B1 Fleet Tracking Module');
+    r = await A.req('POST', '/api/admin/ingest', { admin: true, body: { url: pageUrl } });
+    ok('reading the page again adds nothing new', (await products()).filter((p) => /fleet/i.test(p.product)).length === 1);
+
+    const g = (await A.req('POST', '/api/admin/golden', { admin: true, body: { product: 'SAP B1 Fleet Tracking Module', question: 'Can I see where my trucks are?', ideal_answer: 'Yes, every truck shows live on a map.' } })).json;
+    await A.req('PUT', '/api/admin/products/' + encodeURIComponent('SAP B1 Fleet Tracking Module') + '/notes', { admin: true, body: { notes: 'Works with Teltonika GPS units.' } });
+    r = await A.req('PUT', '/api/admin/products/' + encodeURIComponent('SAP B1 Fleet Tracking Module'), { admin: true, body: { name: 'IQ Fleet', aliases: 'fleet\ngps tracking', reviewed: true } });
+    ok('staff rename it and add nicknames', r.status === 200 && r.json.name === 'IQ Fleet' && r.json.needs_review === false, JSON.stringify(r.json));
+    ok('the new name is live, the guessed one is gone', (await live()).includes('IQ Fleet') && !(await live()).includes('SAP B1 Fleet Tracking Module'));
+    ok('a nickname is recognised', await detect('do you have gps tracking for delivery vans?') === 'IQ Fleet');
+    const detail = (await A.req('GET', '/api/admin/products/' + encodeURIComponent('IQ Fleet'), { admin: true })).json;
+    ok('approved answers, notes and pages move with the rename', detail.golden.some((x) => String(x.id) === String(g.id)) && /Teltonika/.test(detail.notes) && detail.docs.length === 1);
+    r = await A.req('PUT', '/api/admin/products/' + encodeURIComponent('IQ Fleet'), { admin: true, body: { name: 'IQ People' } });
+    ok('two products cannot share a name', r.status === 409);
+    r = await A.req('PUT', '/api/admin/products/' + encodeURIComponent('IQ Fleet'), { admin: true, body: { name: 'General' } });
+    ok('reserved names are refused', r.status === 400);
+
+    r = await A.req('PUT', '/api/admin/products/' + encodeURIComponent('IQ Fleet'), { admin: true, body: { active: false } });
+    ok('switched off: DES stops naming it', r.status === 200 && !(await live()).includes('IQ Fleet') && await detect('do you have gps tracking?') !== 'IQ Fleet');
+    await A.req('PUT', '/api/admin/products/' + encodeURIComponent('IQ Fleet'), { admin: true, body: { active: true } });
+    ok('switched back on', (await live()).includes('IQ Fleet'));
+
+    pageUp = false;
+    r = await A.req('POST', '/api/admin/ingest', { admin: true, body: { url: pageUrl } });
+    const gone = (await products()).find((p) => p.product === 'IQ Fleet');
+    ok('page removed from the website: the product goes off, history kept', r.json.action === 'archived' && gone?.on_website === false && gone.live === false && !(await live()).includes('IQ Fleet'), JSON.stringify(gone));
+    pageUp = true;
+    await A.req('POST', '/api/admin/ingest', { admin: true, body: { url: pageUrl } });
+    ok('page back: the product is live again under the staff name', (await live()).includes('IQ Fleet'));
+    await A.req('DELETE', '/api/admin/golden/' + g.id, { admin: true });
+    await A.req('PUT', '/api/admin/products/' + encodeURIComponent('IQ Fleet'), { admin: true, body: { active: false } });
+  } finally { site.close(); }
+
+  // "Check for new products": the /products/ page (one card per launched product) on its own test backend
+  const SEED_SLUGS = { 'SAP Business One': 'sap-business-one-philippines', 'IQ Ai': 'dynamiq-ai-sap-b1', 'IQ People': 'iq-people', 'IQ Ecom': 'sap-b1-ecom-platform', 'IQ Portal': 'dynamiq-portal', 'IQ Tax': 'dynamiq-tax-module',
+    'IQ Workplace': 'iq-workplace', 'IQ Desk': 'sap-b1-it-desk', 'IQ Barcode': 'dynamiq-barcoding', 'IQ Link': 'dynamiq-iq-link', 'IQ Tech Institute': 'iq-tech-institute', 'IQ REM': 'dynamiq-real-estate-management' };
+  let cards = Object.entries(SEED_SLUGS), listing = 'ok';
+  const card = (origin, [name, slug]) => `<article class="product-row" id="${slug}"><div class="product-media"><img data-src="${origin}/img/${slug}.png" alt="${name} interface" src="data:image/svg+xml;base64,AA==" class="lazyload"></div>
+    <div class="product-copy"><img class="product-logo lazyload" data-src="${origin}/logo/${slug}.svg" alt="${name}" src="data:image/svg+xml;base64,AA=="><h2>${name}</h2>
+    <p>${name} helps Philippine businesses run on SAP Business One &amp; more.</p><a class="text-link" href="${origin}/products/${slug}/">VIEW PRODUCT <span aria-hidden="true">→</span></a></div></article>`;
+  const site2 = http.createServer((req, res) => {
+    const origin = `http://127.0.0.1:${site2.address().port}`;
+    if (req.url === '/products/') {
+      if (listing === 'down') { res.writeHead(503); return res.end(); }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      return res.end(listing === 'empty' ? '<html><body><main><h1>Products</h1></main></body></html>' : `<html><body><main>${cards.map((c) => card(origin, c)).join('\n')}</main></body></html>`);
+    }
+    const slug = req.url.match(/^\/products\/([^/]+)\/$/)?.[1];
+    const hit = cards.find(([, s]) => s === slug);
+    if (hit) { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(`<html><head><title>${hit[0]} for SAP B1 - DynamIQ</title></head><body><main><h2>${hit[0]}</h2><p>${hit[0]} is a DynamIQ product for SAP Business One users in the Philippines, with local support and training.</p></main></body></html>`); }
+    res.writeHead(404); res.end();
+  });
+  await new Promise((done) => site2.listen(0, '127.0.0.1', done));
+  const siteOrigin = `http://127.0.0.1:${site2.address().port}`;
+  const pEnv = testEnv(8797, tempDb(), { PRODUCTS_PAGE_URL: siteOrigin + '/products/' }); prepareDb(pEnv);
+  const T = await startServer(pEnv); const B = api(T.base);
+  const check = async () => (await B.req('POST', '/api/admin/products/check', { admin: true })).json;
+  const list = async () => (await B.req('GET', '/api/admin/products', { admin: true })).json;
+  const names = async () => (await B.req('GET', '/api/admin/status', { admin: true })).json;
+  try {
+    let r = await check();
+    ok('product check: the 12 website products are found, nothing new', r.ok === true && r.found === 12 && r.added.length === 0 && r.gone.length === 0, JSON.stringify(r));
+    let people = (await list()).find((p) => p.product === 'IQ People');
+    ok('product check: card text, logo and picture are stored', /helps Philippine businesses run on SAP Business One & more/.test(people?.description || '') && /\/logo\/iq-people\.svg$/.test(people?.logo_url || '') && /\/img\/iq-people\.png$/.test(people?.image_url || ''), JSON.stringify(people));
+
+    cards = [...cards, ['IQ Drive', 'iq-drive-test']];
+    r = await check();
+    ok('product check: a newly published product is added under its card name', r.ok && r.added.length === 1 && r.added[0] === 'IQ Drive', JSON.stringify(r));
+    const drive = (await list()).find((p) => p.product === 'IQ Drive');
+    ok('product check: it is marked New and live, with its page read', drive?.needs_review === true && drive.live === true && drive.chunks > 0, JSON.stringify(drive));
+    let st = await names();
+    ok('product check: DES names it straight away; the dashboard shows it as new', st.products.includes('IQ Drive') && st.products_new.includes('IQ Drive') && st.products_check?.ok === true);
+    r = await check();
+    ok('product check: checking again adds nothing', r.added.length === 0 && (await list()).filter((p) => /drive/i.test(p.product)).length === 1);
+
+    cards = cards.filter(([n]) => n !== 'IQ Drive');
+    r = await check();
+    ok('product check: missing once is not enough to switch a product off', r.gone?.length === 0 && (await names()).products.includes('IQ Drive'), JSON.stringify(r));
+    r = await check();
+    ok('product check: missing twice in a row → page gone, DES stops naming it', r.gone.includes('IQ Drive') && !(await names()).products.includes('IQ Drive'), JSON.stringify(r));
+
+    listing = 'empty'; r = await check();
+    ok('product check: a page with no products changes nothing (treated as broken)', r.ok === false && (await names()).products.length === 13, JSON.stringify(r));
+    listing = 'down'; r = await check();
+    ok('product check: website down is reported, nothing changes', r.ok === false && /503/.test(r.detail || '') && (await names()).products.length === 13, JSON.stringify(r));
+    st = await names();
+    ok('product check: the failed check is shown in the dashboard', st.products_check?.ok === false);
+    ok('product check: the User role may not run it', (await B.req('POST', '/api/admin/products/check', { cookie: await login(T.base, 'user') })).status === 403);
+  } finally { await stopServer(T.base, T.proc); site2.close(); }
+});
+
+// =====================================================================================
 sec('10. Admin API');
 if (want('admin')) await guard('admin', async () => {
   for (const p of ['/api/admin/overview', '/api/admin/leads', '/api/admin/golden']) ok(`${p} needs a signed-in user`, (await A.req('GET', p)).status === 401);
@@ -422,12 +538,16 @@ if (want('admin')) await guard('admin', async () => {
   const id = ident(); const s = await A.session(id);
   const listed = (await A.req('GET', '/api/admin/conversations?limit=200', { admin: true })).json.some((c) => c.id === s.json.session_id);
   const listedAll = (await A.req('GET', '/api/admin/conversations?limit=200&all=1', { admin: true })).json.some((c) => c.id === s.json.session_id);
-  ok('empty chats hidden from the list (shown with all=1)', !listed && listedAll);
-  const leads = (await A.req('GET', '/api/admin/leads', { admin: true })).json;
-  if (leads.length) {
-    await A.req('PUT', '/api/admin/leads/' + leads[0].id, { admin: true, body: { status: 'contacted' } });
-    ok('lead status updated', (await A.req('GET', '/api/admin/leads', { admin: true })).json.find((l) => l.id === leads[0].id).status === 'contacted');
-  } else info('lead status update', 'skipped: the AI saved no leads in this run');
+  ok('a sign-up that never asked anything is still listed (every sign-up is a lead)', listed && listedAll);
+  const signup = (await A.req('GET', '/api/admin/conversations?lead=uncalled&limit=200', { admin: true })).json.find((c) => c.id === s.json.session_id);
+  ok('…as a lead not called yet, with name and mobile', !!signup?.lead_id && signup.lead_status === 'new' && !!signup.phone, JSON.stringify(signup && { lead_status: signup.lead_status, phone: !!signup.phone }));
+  for (const st of ['contacted', 'call_again', 'qualified', 'not_interested']) {
+    await A.req('PUT', '/api/admin/leads/' + signup?.lead_id, { admin: true, body: { status: st } });
+    ok('call result saved: ' + st, (await A.req('GET', '/api/admin/leads', { admin: true })).json.find((l) => l.id === signup?.lead_id)?.status === st);
+  }
+  const counts = (await A.req('GET', '/api/admin/conversation-counts', { admin: true })).json;
+  ok('chip counts per call result', ['uncalled', 'tocall', 'new', 'contacted', 'call_again', 'qualified', 'not_interested'].every((k) => typeof counts[k] === 'number') && !('closed' in counts), JSON.stringify(counts));
+  ok('old statuses are refused', (await A.req('PUT', '/api/admin/leads/' + signup?.lead_id, { admin: true, body: { status: 'closed' } })).status === 400);
   let r = await A.req('POST', '/api/admin/shutdown', { raw: false, body: {} });
   ok('remote shutdown without token refused', r.status === 403);
   r = await fetch(base + '/api/admin/shutdown', { method: 'POST', headers: { authorization: 'Bearer ' + ADMIN, 'cf-connecting-ip': '203.0.113.5' } });
@@ -507,7 +627,7 @@ if (want('users')) await guard('users', async () => {
   ok('after sign-out the cookie no longer works', (await fetch(base + '/api/admin/auth/me', { headers: { cookie: oc } })).status === 401);
   // permission matrix: every role × representative endpoint (403 = refused)
   const S = ['superuser'], SA = ['superuser', 'admin'], ALL = ['superuser', 'admin', 'user'];
-  const matrix = [['GET', '/api/admin/overview', ALL], ['GET', '/api/admin/conversations?limit=2', ALL], ['GET', '/api/admin/leads', ALL], ['PUT', '/api/admin/leads/00000000-0000-0000-0000-000000000000', ALL, { status: 'contacted' }],
+  const matrix = [['GET', '/api/admin/overview', ALL], ['GET', '/api/admin/conversations?limit=2', ALL], ['GET', '/api/admin/leads', ALL], ['PUT', '/api/admin/leads/00000000-0000-0000-0000-000000000000', ALL, { status: 'call_again' }],
     ['GET', '/api/admin/export/leads.csv', SA], ['GET', '/api/admin/export/finetune.jsonl', SA], ['GET', '/api/admin/golden', SA], ['GET', '/api/admin/review-queue', SA], ['GET', '/api/admin/products', SA],
     ['GET', '/api/admin/kb', SA], ['GET', '/api/admin/facts', SA], ['GET', '/api/admin/glossary', SA], ['GET', '/api/admin/bans', SA],
     ['GET', '/api/admin/prompt', S], ['GET', '/api/admin/settings', S], ['GET', '/api/admin/sites', S], ['GET', '/api/admin/users', S], ['GET', '/api/admin/audit', S],
@@ -636,7 +756,7 @@ if (want('remarks')) await guard('remarks', async () => {
   // make sure there is a lead (the AI usually saves one; this guarantees it for the test)
   let list = (await A.req('GET', '/api/admin/conversations?lead=lead&limit=200', { as: 'admin' })).json;
   let row = list.find((c) => c.id === cid);
-  if (!row) { await A.req('POST', '/api/handoff', { token: s.token, id, body: { reason: 'test' } }); info('AI saved no lead this time; lead filter checked on other chats'); }
+  if (!row) info('AI saved no lead this time; lead filter checked on other chats');
   const anyLead = list[0];
   ok('lead filter returns only chats with a lead, with status and remark fields', list.length > 0 && list.every((c) => c.lead_id && 'lead_status' in c && 'remarks_count' in c));
   const target = row || anyLead;
@@ -649,7 +769,67 @@ if (want('remarks')) await guard('remarks', async () => {
   ok('empty remark refused', r.status === 400);
   const det = (await A.req('GET', `/api/admin/conversations/${target.id}/detail`, { as: 'admin' })).json;
   ok('remark appears in the conversation with who and when', det.remarks.some((x) => x.body.startsWith('No answer') && x.user_email === USERS.user && x.created_at));
-  ok('a new lead becomes "contacted" after the first remark', det.lead?.status !== 'new', det.lead?.status);
+  ok('a lead not called yet becomes "contacted" after the first remark', det.lead?.status === 'contacted' || (target.lead_status !== 'new' && det.lead?.status === target.lead_status), det.lead?.status);
+  {
+    const o = (body) => A.req('POST', `/api/admin/conversations/${target.id}/outcome`, { as: 'admin', body });
+    const before = (await A.req('GET', `/api/admin/conversations/${target.id}/detail`, { as: 'admin' })).json.lead;
+    let r = await o({ outcome: 'callback' });
+    ok('call back without a time is refused', r.status === 400 && r.json.error === 'time_needed', r.status);
+    const soon = new Date(Date.now() - 60e3).toISOString(); // already due
+    r = await o({ outcome: 'callback', at: soon, note: 'asked for the afternoon' });
+    ok('call back: status Call again, follow-up time set, remark written', r.status === 200 && r.json.lead.status === 'call_again' && !!r.json.lead.next_action_at && /Call again/.test(r.json.remark.body) && /afternoon/.test(r.json.remark.body), JSON.stringify(r.json).slice(0, 200));
+    const queue = (await A.req('GET', '/api/admin/conversations?lead=tocall&limit=200', { as: 'admin' })).json;
+    ok('a due call-back is in the To call queue, first', queue[0]?.id === target.id, queue.slice(0, 3).map((c) => c.name).join(', '));
+    const counts = (await A.req('GET', '/api/admin/conversation-counts', { as: 'admin' })).json;
+    ok('counts include the To call queue', counts.tocall >= 1, JSON.stringify(counts));
+    const u = await A.req('POST', `/api/admin/conversations/${target.id}/outcome/undo`, { as: 'admin', body: { remark_id: r.json.remark.id, previous: r.json.previous } });
+    const after = (await A.req('GET', `/api/admin/conversations/${target.id}/detail`, { as: 'admin' })).json;
+    ok('undo removes the remark and puts the lead back', u.status === 200 && after.lead.status === before.status && String(after.lead.next_action_at) === String(before.next_action_at) && !after.remarks.some((x) => x.id === r.json.remark.id), after.lead.status);
+    r = await o({ outcome: 'no_answer' });
+    ok('no answer: one unanswered call, next try about 4 h later', r.json.lead.attempts === (before.attempts || 0) + 1 && Math.abs(new Date(r.json.lead.next_action_at) - Date.now() - 4 * 3600e3) < 120e3, JSON.stringify(r.json.lead).slice(0, 160));
+    ok('there is no "contacted" call outcome (the result is known right after the call)', (await o({ outcome: 'contacted' })).status === 400);
+    const leadId = before.id;
+    const pc = (await A.req('PUT', '/api/admin/leads/' + leadId, { as: 'admin', body: { status: 'contacted' } })).json;
+    const fu = new Date(pc.lead?.next_action_at);
+    ok('contacted (set by hand): a follow-up 1–4 days later at 9 AM Manila', pc.lead?.status === 'contacted' && fu - Date.now() > 864e5 * 0.9 && fu - Date.now() < 864e5 * 4.1 && fu.getUTCHours() === 1, pc.lead?.next_action_at);
+    ok('contacted is not in To call until the follow-up is due', !(await A.req('GET', '/api/admin/conversations?lead=tocall&limit=200', { as: 'admin' })).json.some((c) => c.id === target.id));
+    await A.req('PUT', '/api/admin/leads/' + leadId, { as: 'admin', body: { status: 'call_again' } });
+    const now = (await A.req('GET', '/api/admin/conversations?lead=tocall&limit=200', { as: 'admin' })).json.find((c) => c.id === target.id);
+    ok('Call again set by hand (no time) is due right away', !!now && !now.next_action_at);
+    await A.req('PUT', '/api/admin/leads/' + leadId, { as: 'admin', body: { status: 'qualified' } });
+    ok('Qualified leaves the call list', !(await A.req('GET', '/api/admin/conversations?lead=tocall&limit=200', { as: 'admin' })).json.some((c) => c.id === target.id));
+    // start from a lead that is not Qualified (the step above set it by hand), so the count can go up by one
+    await A.req('PUT', '/api/admin/leads/' + leadId, { as: 'admin', body: { status: 'call_again' } });
+    const ov0 = (await A.req('GET', '/api/admin/overview?days=7', { as: 'admin' })).json.kpi.qualified;
+    const q1 = await o({ outcome: 'qualified' });
+    ok('Qualified button: status Qualified, date recorded, no next call', q1.json.lead.status === 'qualified' && !!q1.json.lead.qualified_at && !q1.json.lead.next_action_at, JSON.stringify(q1.json.lead).slice(0, 160));
+    ok('Overview counts it as Qualified in the period', (await A.req('GET', '/api/admin/overview?days=7', { as: 'admin' })).json.kpi.qualified === ov0 + 1, ov0);
+    await A.req('POST', `/api/admin/conversations/${target.id}/outcome/undo`, { as: 'admin', body: { remark_id: q1.json.remark.id, previous: q1.json.previous } });
+    ok('undo of Qualified takes it off the count again', (await A.req('GET', '/api/admin/overview?days=7', { as: 'admin' })).json.kpi.qualified === ov0);
+    r = await o({ outcome: 'not_interested', reason: 'Price' });
+    ok('not interested: status and reason saved, no next call', r.json.lead.status === 'not_interested' && r.json.lead.lost_reason === 'Price' && !r.json.lead.next_action_at);
+    await A.req('POST', `/api/admin/conversations/${target.id}/outcome/undo`, { as: 'admin', body: { remark_id: r.json.remark.id, previous: r.json.previous } });
+  }
+  {
+    // live takeover: a team member takes over, DES stays silent, the widget gets their messages, hand back brings DES back
+    const tid = ident(); const ts = await A.session(tid, { name: 'Takeover Tester' });
+    const tcid = ts.json.session_id;
+    let tr = await A.req('POST', `/api/admin/conversations/${tcid}/takeover`, { as: 'user' });
+    ok('takeover: a telemarketer (User role) takes over a chat', tr.status === 200 && !!tr.json.agent_name, tr.text);
+    const c1 = await A.chat(ts.token, 'Hello, is someone there?', tid);
+    ok('takeover: DES does not answer while a person has the chat', c1.done?.agent === true && !c1.done?.text, JSON.stringify(c1.done));
+    tr = await A.req('POST', `/api/admin/conversations/${tcid}/reply`, { as: 'user', body: { text: 'Hi! This is the DynamIQ team.' } });
+    ok('takeover: the team member replies', tr.status === 200, tr.text);
+    tr = await A.req('POST', `/api/admin/conversations/${tcid}/reply`, { as: 'admin', body: { text: 'not mine' } });
+    ok('takeover: someone who has not taken over cannot reply', tr.status === 409, tr.status);
+    const up = await A.req('POST', '/api/updates', { token: ts.token, id: tid, body: { after: 0 } });
+    ok('takeover: the widget gets the team member\'s message and the "joined" notice', !!up.json?.agent && up.json.items.some((i) => i.role === 'assistant' && /DynamIQ team/.test(i.content)) && up.json.items.some((i) => /joined the chat/.test(i.content)), JSON.stringify(up.json).slice(0, 220));
+    const td = (await A.req('GET', `/api/admin/conversations/${tcid}/detail`, { as: 'admin' })).json;
+    ok('takeover: the visitor\'s message and the reply (with its author) are in the conversation', td.messages.some((m) => m.role === 'user' && /someone there/.test(m.content)) && td.messages.some((m) => m.author && /DynamIQ team/.test(m.content)));
+    await A.req('POST', `/api/admin/conversations/${tcid}/handback`, { as: 'user' });
+    const c2 = await A.chat(ts.token, 'Do you handle BIR CAS?', tid);
+    ok('takeover: after hand-back DES answers again', !c2.done?.agent && (c2.done?.text || '').length > 10, (c2.done?.text || '').slice(0, 80));
+  }
   ok('called lead leaves the "not called yet" list', !(await A.req('GET', '/api/admin/conversations?lead=uncalled&limit=200', { as: 'admin' })).json.some((c) => c.id === target.id));
   const row2 = (await A.req('GET', '/api/admin/conversations?lead=lead&limit=200', { as: 'admin' })).json.find((c) => c.id === target.id);
   ok('list shows the remark count and the latest remark', row2?.remarks_count >= 1 && /No answer/.test(row2.last_remark?.body || ''), JSON.stringify(row2?.last_remark));
@@ -828,11 +1008,15 @@ if (want('dashboard')) await guard('dashboard', async () => {
   const visible = U.$$('#nav button').filter((b) => !b.hidden).map((b) => b.dataset.page).join(',');
   ok('User role menu: Overview and Conversations & leads only', visible === 'overview,conversations', visible);
   U.w.location.hash = '#/leads'; await until(() => U.$('#main h1')?.textContent === 'Conversations & leads', 8000); await sleep(300);
-  ok('old Leads address opens Conversations & leads filtered to leads', /#\/conversations\/leads$/.test(U.w.location.hash) && U.$$('#main select').some((s) => s.value === 'lead'), U.w.location.hash);
+  await until(() => U.$('.fbar .qchip.is-on'), 6000);
+  ok('old Leads address opens Conversations & leads showing everyone', /#\/conversations\?lead=$/.test(U.w.location.hash) && U.$('.fbar .qchip.is-on')?.dataset.seg === 'all', U.w.location.hash + ' · ' + U.$('.fbar .qchip.is-on')?.dataset.seg);
   ok('User role: no CSV export button', !U.$$('#main button').some((b) => /CSV/.test(b.textContent)));
-  U.w.location.hash = '#/conversations'; await sleep(400); await until(() => U.$('tr.is-click') && !U.$('#main .loading'), 8000); await sleep(400);
-  U.$('tr.is-click').click(); await until(() => U.$('.drawer .remarks-card'), 8000);
-  ok('User role: share link button yes, delete-visitor button no', [...U.$$('.drawer button')].some((b) => /Create share link/.test(b.textContent)) && ![...U.$$('.drawer button')].some((b) => /Delete this visitor/.test(b.textContent)), U.$$('.drawer button').map((b) => b.textContent.trim()).join(' | '));
+  U.w.location.hash = '#/conversations?lead='; await sleep(400); await until(() => U.$('.rcard[data-id]') && !U.$('#main .loading'), 8000); await sleep(400);
+  U.$('.rcard[data-id]').click(); await until(() => U.$('.drawer .remarks-card'), 8000);
+  const uItems = await (async () => { U.$('.drawer .menu-btn')?.click(); await sleep(80); const t = U.$$('.pop .menu__item').map((b) => b.textContent); U.$('.pop')?.dispatchEvent(new U.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(50); return t; })();
+  ok('User role: share link in the More menu, no delete-visitor', uItems.some((t) => /Create share link/.test(t)) && !uItems.some((t) => /Delete this visitor/.test(t)), uItems.join(' | '));
+  ok('User role: no Pipeline or Export (no page More menu)', !U.$('#main .top .menu-btn'));
+    // (old check replaced)
   U.d.dispatchEvent(new U.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
   U.w.location.hash = '#/settings'; await sleep(600);
   ok('User role: typing a hidden page address shows the Overview instead', U.$('#main h1')?.textContent !== 'Settings', U.$('#main h1')?.textContent);
@@ -842,24 +1026,43 @@ if (want('dashboard')) await guard('dashboard', async () => {
   const toasts = []; new P.w.MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((x) => { if (x.classList?.contains('toast')) toasts.push((x.classList.contains('is-bad') ? 'BAD ' : '') + x.textContent); }))).observe(P.d.body, { childList: true });
   ok('signed-in superuser gets the dashboard', await until(() => !P.$('#app').hidden, 8000));
   const go = async (h) => { P.w.location.hash = h; await sleep(250); await until(() => !P.$('#main .loading'), 15000); await sleep(400); };
-  const pages = { '#/overview': () => P.$$('.kpi').length >= 8 && !!P.$('.chart svg'), '#/conversations': () => P.$$('tbody tr.is-click').length > 0, '#/conversations/leads': () => P.$('#main h1')?.textContent === 'Conversations & leads' && P.$$('#main button').some((b) => /Download leads CSV/.test(b.textContent)),
-    '#/finetune/IQ%20People': () => P.$$('.plist button').length === 13 && !!P.$('.test') && !!P.$('.ptabs'), '#/review': () => P.$('#main h1')?.textContent === 'Needs review',
-    '#/kb': () => P.d.querySelector('.paged tbody')?.children.length === 25 && !!P.$('.pager'), '#/settings': () => P.$$('input.mono').length > 5 && !!P.$('details textarea') };
-  for (const [h, check] of Object.entries(pages)) { await go(h); await until(check, 8000); ok('page ' + h, check()); }
-  // pagination
-  await go('#/kb');
-  const firstKb = P.$('tbody tr td a')?.textContent;
-  ok('website pages: pager shows "1–25 of …"', /^1–25 of \d+/.test(P.$('.pager__info')?.textContent || ''), P.$('.pager__info')?.textContent);
-  [...P.$$('.pager button')].find((b) => b.textContent === '2').click(); await sleep(200);
-  ok('website pages: page 2 shows the next 25', /^26–/.test(P.$('.pager__info')?.textContent || '') && P.$('tbody tr td a')?.textContent !== firstKb, P.$('.pager__info')?.textContent);
-  ok('website pages: Prev enabled, current page marked', !P.$$('.pager button').find((b) => /Prev/.test(b.textContent)).disabled && P.$('.pager button.is-on')?.textContent === '2');
-  const search = P.$('#main input[type=search]'); search.value = 'iq people'; search.dispatchEvent(new P.w.Event('input')); await sleep(400);
-  ok('website pages: search resets to one short page', !P.$('.pager') || /^1–/.test(P.$('.pager__info').textContent));
+  const pages = { '#/overview': () => P.$$('.ov__kpis .kpi').length === 4 && P.$$('.ministat').length === 4 && !!P.$('.chart svg'), '#/conversations?lead=': () => P.$$('.rcard[data-id]').length > 0, '#/conversations/leads': () => P.$('#main h1')?.textContent === 'Conversations & leads' && !!P.$('#main .top .menu-btn'),
+    '#/finetune': () => P.$$('.pgrid .pcard').length >= 13 && !!P.$('.ftov__checked') && [...P.$$('#main .top button')].some((b) => /Check for new products/.test(b.textContent)),
+    '#/finetune/IQ%20People': () => P.$$('.plist__item').length >= 2 && !!P.$('.plist__item.is-on') && !!P.$('.test') && !!P.$('.ptabs') && !!P.$('.plist__all') && !!P.$('.ft__links a[href*="/products/iq-people/"]'), '#/review': () => P.$('#main h1')?.textContent === 'Needs review',
+    '#/kb?q=': () => P.$$('.rows .rrow').length === 25 && !!P.$('.loadmore button'), '#/settings': () => P.$$('.subnav button').length >= 5 && !!P.$('.setting input'),
+    '#/users': () => P.$$('.ucard').length >= 3, '#/audit': () => P.$$('.tl__item').length > 0 };
+  for (const [h, check] of Object.entries(pages)) { await go(h); await until(check, 8000); ok('page ' + h, check()); ok('no tables on ' + h, !P.$('#main table')); }
+  // filter bar: chip counts from the server, the address keeps the filter, Pipeline shows the four lead columns
+  await go('#/conversations?lead=');
+  ok('conversations: quick chips show counts', await until(() => Number((P.$('.qchip[data-seg="all"] .qchip__n')?.textContent || '').replace(/\D/g, '')) > 0, 6000), P.$('.qchip[data-seg="all"]')?.textContent);
+  P.$('.qchip[data-seg="uncalled"]').click(); await sleep(150); await until(() => !P.$('#main .loading'), 8000); await sleep(300);
+  ok('conversations: To call tab lists leads to call (not called yet, or a call that is due) and is kept in the address', /lead=uncalled/.test(P.w.location.hash) && P.$$('.rcard[data-id]').length > 0 && P.$$('.rcard[data-id]').every((c) => c.querySelector('.lbadge--new') || /Call now|Call due now/.test(c.textContent)), P.w.location.hash);
+  ok('conversations: two tabs (To call · Everyone), the chosen one marked, no extra filter chip', P.$$('.fbar--compact .qchip').length === 2 && P.$('.fbar--compact .qchip.is-on')?.dataset.seg === 'uncalled' && !P.$('.achip'));
+  ok('conversations: no Start call list button (the To call tab is the call list); header is More only', P.$$('#main .top__tools > button').length === 1 && !P.$$('#main button').some((b) => /Start call list/.test(b.textContent)));
+  P.$('#main .top .menu-btn').click(); await sleep(80);
+  [...P.$$('.pop .menu__item')].find((b) => /Pipeline view/.test(b.textContent))?.click();
+  ok('pipeline: five lead columns', await until(() => P.$$('.kcol[data-status]').length === 5 && !P.$('.kanban .loading'), 15000), P.$$('.kcol').length);
+  P.$('#main [data-view="list"]').click(); await until(() => P.$('.rcard[data-id]'), 8000);
+  [...P.$$('.fbar__active .link-btn')].find((b) => /Clear all/.test(b.textContent))?.click(); await sleep(400);
+  await go('#/audit');
+  ok('audit log: plain sentences, no raw JSON', P.$$('.tl__text').length > 0 && !P.$$('.tl__text').some((x) => /[{}]/.test(x.textContent)));
+  P.$('.qchip[data-seg="security"]').click(); await sleep(150); await until(() => !P.$('#main .loading'), 8000); await sleep(300);
+  ok('audit log: "Security only" shows only security events', P.$$('.tl__item').length > 0 && P.$$('.tl__text').every((x) => /Wrong password|locked|unknown email|disabled|deleted/i.test(x.textContent)), P.$$('.tl__text').slice(0, 3).map((x) => x.textContent).join(' | '));
+  // website pages: 25 at a time with "Show more"; search narrows the list; selecting pages shows bulk actions
+  await go('#/kb?q=');
+  ok('website pages: shows 25, then "Show more"', P.$$('.rows .rrow').length === 25 && /25 of \d+/.test(P.$('.loadmore .note')?.textContent || ''), P.$('.loadmore .note')?.textContent);
+  P.$('.loadmore button').click(); await sleep(150);
+  ok('website pages: "Show more" adds the next 25', P.$$('.rows .rrow').length > 25, P.$$('.rows .rrow').length);
+  P.$$('.rows .rrow__check').slice(0, 2).forEach((c) => { c.checked = true; c.dispatchEvent(new P.w.Event('change')); });
+  ok('website pages: selecting pages shows the bulk bar', !P.$('.bulkbar').hidden && /2 selected/.test(P.$('.bulkbar').textContent));
+  const search = P.$('#main .fbar__search'); search.value = 'iq people'; search.dispatchEvent(new P.w.Event('input')); await sleep(500);
+  ok('website pages: search narrows the list and says how many', P.$$('.rows .rrow').length < 25 && /of \d+ pages/.test(P.$('.fbar__count')?.textContent || ''), P.$('.fbar__count')?.textContent);
+  search.value = ''; search.dispatchEvent(new P.w.Event('input')); await sleep(400);
   await go('#/finetune/IQ%20People');
   for (const tab of ['questions', 'notes', 'pages', 'answers']) { P.$(`.ptabs button[data-tab="${tab}"]`).click(); await sleep(150); ok('fine-tune tab: ' + tab, P.$('[role=tabpanel]').textContent.length > 20); }
   if (want('capture')) {
-    await go('#/conversations'); const sb = P.$('#main input[type=search]'); sb.value = 'Capture Tester'; sb.dispatchEvent(new P.w.Event('input'));
-    await until(() => P.$$('tbody tr.is-click').length === 1, 8000); P.$('tr.is-click').click();
+    await go('#/conversations?lead='); const sb = P.$('#main .fbar__search'); sb.value = 'Capture Tester'; sb.dispatchEvent(new P.w.Event('input'));
+    await until(() => P.$$('.rcard[data-id]').length === 1, 8000); P.$('.rcard[data-id]').click();
     await until(() => P.$('.drawer [data-tab="history"]'), 8000);
     ok('drawer offers the visitor history of the same person', !!P.$('.drawer [data-tab="history"]'));
     P.$('.drawer [data-tab="history"]')?.click();
@@ -868,15 +1071,15 @@ if (want('dashboard')) await guard('dashboard', async () => {
     ok('clicking a row reveals that chat (sign-up bubbles in grey)', await until(() => P.$$('.drawer .msg--script').length >= 5, 4000), P.$$('.drawer .msg--script').length);
     ok('incomplete and guardrail-replaced replies are flagged', P.$$('.drawer .badge').some((b) => /Cut short/.test(b.textContent)) && !!P.$('.drawer .msg__orig'));
     P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
-    sb.value = ''; sb.dispatchEvent(new P.w.Event('input')); await until(() => P.$$('tbody tr.is-click').length > 1, 8000);
+    sb.value = ''; sb.dispatchEvent(new P.w.Event('input')); await until(() => P.$$('.rcard[data-id]').length > 1, 8000);
   }
   if (want('live')) {
-    await go('#/conversations');
+    await go('#/conversations?lead=');
     ok('dashboard shows "Live"', await until(() => /Live/.test(P.$('#livePill')?.textContent || ''), 6000), P.$('#livePill')?.textContent);
     const lid = ident(); const ls = await A.session(lid, { name: 'Dash Live' });
     await A.chat(ls.token, 'our SAP is not working, error on login', lid);
-    ok('a new chat appears in the list without reloading, with the live dot', await until(() => P.$(`tr[data-id="${ls.json.session_id}"].is-live`), 8000));
-    P.$(`tr[data-id="${ls.json.session_id}"]`).click(); await until(() => P.$('.drawer .thread'), 8000);
+    ok('a new chat appears in the list without reloading, with the live dot', await until(() => P.$(`.rcard[data-id="${ls.json.session_id}"].is-live`), 8000));
+    P.$(`.rcard[data-id="${ls.json.session_id}"]`).click(); await until(() => P.$('.drawer .thread'), 8000);
     await A.req('POST', '/api/typing', { token: ls.token, id: lid, body: { state: 'start' } });
     ok('open conversation shows "Dash is typing…"', await until(() => !P.$('.drawer .typing-line').hidden && /Dash is typing/.test(P.$('.drawer .typing-line').textContent), 6000));
     const n0 = P.$$('.drawer .msg').length;
@@ -884,14 +1087,17 @@ if (want('dashboard')) await guard('dashboard', async () => {
     ok('new messages appear in the open conversation', await until(() => P.$$('.drawer .msg').length >= n0 + 2, 8000) && P.$('.drawer .typing-line').hidden);
     P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100);
   }
-  await go('#/conversations'); P.$('tr.is-click').click(); await until(() => P.$('.drawer .thread'), 8000);
+  await go('#/conversations?lead='); P.$('.rcard[data-id]').click(); await until(() => P.$('.drawer .thread'), 8000);
   ok('conversation drawer opens with messages', P.$$('.drawer .msg').length > 0);
-  ok('drawer offers "Create share link" to a superuser', [...P.$$('.drawer button')].some((b) => /Create share link/.test(b.textContent)));
+  const pItems = await (async () => { P.$('.drawer .menu-btn')?.click(); await sleep(80); const t = P.$$('.pop .menu__item').map((b) => b.textContent); P.$('.pop')?.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(50); return t; })();
+  ok('drawer More menu: share link and delete visitor data for a superuser', pItems.some((t) => /Create share link/.test(t)) && pItems.some((t) => /Delete this visitor/.test(t)), pItems.join(' | '));
   const ta = P.$('.drawer .remarks-card textarea');
-  ok('drawer has a remarks box with quick notes', !!ta && P.$$('.drawer .remarks-card .chip').length >= 5);
-  P.$$('.drawer .remarks-card .chip').find((b) => /No answer/.test(b.textContent)).click();
-  [...P.$$('.drawer .remarks-card button')].find((b) => /Save remark/.test(b.textContent)).click();
-  ok('saving a remark shows it in the conversation', await until(() => P.$$('.drawer .remark').some((x) => /No answer/.test(x.textContent)), 6000));
+  ok('drawer has the five call outcomes, Qualified first, and a note box', !!ta && P.$$('.drawer .outcome').map((b) => b.dataset.outcome).join() === 'qualified,callback,not_interested,no_answer,wrong_number');
+  P.$('.drawer .outcome[data-outcome="no_answer"]').click();
+  ok('"No answer" is recorded in one click and shows in the remarks', await until(() => P.$$('.drawer .remark').some((x) => /No answer/.test(x.textContent)), 6000));
+  ok('…with the next try and the unanswered call on the status line', await until(() => /Next call/.test(P.$('.drawer .lead-status')?.textContent || '') && /1 unanswered call/.test(P.$('.drawer .lead-status').textContent), 4000), P.$('.drawer .lead-status')?.textContent);
+  await sleep(1500); // the live update and the save response both arrive by now
+  ok('the saved remark is listed once (not twice from the live update)', P.$$('.drawer .remark').filter((x) => /No answer/.test(x.textContent)).length === 1, P.$$('.drawer .remark').length + ' remarks shown');
   P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(100); ok('Escape closes it', !P.$('.drawer'));
   await go('#/finetune/IQ%20People');
   [...P.$$('button')].find((b) => b.textContent.includes('Add approved answer')).click(); await sleep(200);

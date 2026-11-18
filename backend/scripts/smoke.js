@@ -53,7 +53,6 @@ ok('Filipino detected', chat6.find((x) => x.ev === 'done')?.data.lang === 'fil')
 await j('/feedback', { kind: 'thumb', thumb: -1, message_id: null }, auth);
 await j('/feedback', { kind: 'survey', trigger: 'close', rating: 4, reasons: [], resolved: 'yes' }, auth);
 ok('feedback stored', true);
-const ho = await j('/handoff', { reason: 'visitor' }, auth); ok('handoff', ho.ok === true, ho.already ? 'already' : 'emailed (console)');
 await j('/end', {}, auth); ok('end + summary', true);
 
 if (admin) {

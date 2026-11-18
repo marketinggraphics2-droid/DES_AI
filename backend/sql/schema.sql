@@ -24,7 +24,7 @@ create table if not exists conversations (
   visitor_id uuid references visitors(id) on delete cascade,
   started_at timestamptz default now(),
   ended_at timestamptz,
-  status text default 'open',       -- open | handed_off | closed
+  status text default 'open',       -- open | closed | ended
   lang text default 'en',
   summary text,
   turns int default 0
@@ -50,7 +50,7 @@ create table if not exists leads (
   company text, industry text, need text, team_size text, current_system text,
   product_interest text[],
   demo_requested boolean default false,
-  status text default 'new',        -- new | contacted | qualified | closed
+  status text default 'new',        -- new (not called yet) | contacted | call_again | qualified | not_interested
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -318,3 +318,70 @@ create table if not exists remarks (
   created_at timestamptz default now()
 );
 create index if not exists remarks_conv_idx on remarks(conversation_id, id);
+
+-- ---- hand-to-Sales removed (2026-11-18): chats are no longer marked "handed_off". Old ones go back to open / closed.
+-- The handoffs table is kept (unused) so past records are not lost.
+update conversations set status = case when ended_at is null then 'open' else 'closed' end where status = 'handed_off';
+
+-- ---- products come from the website (2026-11-18) ----
+-- One row per page under dynamiqes.com/products/<slug>/. New pages are added by the sweep / webhook (needs_review = true);
+-- staff set the name and nicknames in the dashboard. The 12 original products are filled in on first start (products.js).
+create table if not exists products (
+  name text primary key,                         -- as DES writes it, e.g. "IQ Barcode"
+  slug text unique,                              -- the product page under /products/ (null = no page)
+  aliases text[] not null default '{}',          -- nicknames visitors use, e.g. payroll → IQ People
+  active boolean not null default true,          -- staff switch: off = DES no longer names the product
+  on_website boolean not null default true,      -- false once the product page is gone from the website
+  needs_review boolean not null default false,   -- added automatically: check the name
+  sort int,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+-- what the website's /products/ page shows for each product (refreshed by the product check, products.js)
+alter table products add column if not exists website_name text;         -- the card heading, e.g. "IQ Barcode"
+alter table products add column if not exists description text;          -- the card text
+alter table products add column if not exists logo_url text;
+alter table products add column if not exists image_url text;
+alter table products add column if not exists last_seen_at timestamptz;  -- last check that found it on the website
+alter table products add column if not exists missed_checks int not null default 0; -- checks in a row it was missing (2 = page gone)
+-- the last product check (one row)
+create table if not exists product_checks (
+  id int primary key default 1 check (id = 1),
+  checked_at timestamptz,
+  ok boolean,
+  found int,
+  added text[],
+  gone text[],
+  detail text
+);
+
+-- ---- every sign-up is a lead; status = the result of the last call (2026-11-18) ----
+-- new = not called yet · contacted (spoke with them) · call_again (no answer, call back) · qualified (set by hand) · not_interested. closed carried over.
+update leads set status = 'not_interested' where status = 'closed';
+-- a short-lived rename called Qualified 'interested'; the team counts Qualified, so the word stays
+update leads set status = 'qualified' where status = 'interested';
+-- visitors who signed up but have no lead yet get one on their first conversation (name + mobile are enough to call)
+insert into leads(visitor_id, conversation_id, created_at, updated_at)
+  select distinct on (c.visitor_id) c.visitor_id, c.id, c.started_at, c.started_at from conversations c
+  where not exists (select 1 from leads l where l.visitor_id = c.visitor_id)
+  order by c.visitor_id, c.started_at
+  on conflict do nothing;
+
+-- call outcomes: what happens next with a lead, and how often nobody answered
+alter table leads add column if not exists next_action_at timestamptz;   -- call again / follow up at this time (shows in "To call" once due)
+alter table leads add column if not exists attempts int default 0;      -- calls that did not reach the person
+alter table leads add column if not exists last_attempt_at timestamptz;
+alter table leads add column if not exists lost_reason text;            -- why a lead is not interested (price, has a system, wrong number, …)
+alter table remarks add column if not exists outcome text;              -- no_answer | callback | interested | demo | not_interested | wrong_number (null = plain note)
+create index if not exists leads_next_action on leads(next_action_at) where next_action_at is not null;
+
+-- when a lead became Qualified (the number the team counts, by period); leads already Qualified take their last update
+alter table leads add column if not exists qualified_at timestamptz;
+update leads set qualified_at = updated_at where status = 'qualified' and qualified_at is null;
+update leads set qualified_at = null where status <> 'qualified' and qualified_at is not null;
+
+-- live takeover: a team member chats with the visitor; DES stays silent until the chat is handed back
+alter table conversations add column if not exists agent_id uuid;         -- the dashboard user chatting now (null = DES)
+alter table conversations add column if not exists agent_name text;       -- their first name, as the visitor sees it
+alter table conversations add column if not exists agent_last_at timestamptz; -- their last message; quiet too long = back to DES
+alter table messages add column if not exists author text;                -- the team member who wrote this reply (null = DES)

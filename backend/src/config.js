@@ -88,6 +88,9 @@ export const cfg = {
 
   siteOrigin: process.env.SITE_ORIGIN || 'https://dynamiqes.com',
   sitemapUrl: process.env.SITEMAP_URL || 'https://dynamiqes.com/sitemap_index.xml',
+  // the website page that lists every launched product (cards with name, logo, text); checked every few hours (product-sync.js)
+  productsPageUrl: process.env.PRODUCTS_PAGE_URL || `${(process.env.SITE_ORIGIN || 'https://dynamiqes.com').replace(/\/$/, '')}/products/`,
+  productCheckHours: Number(process.env.PRODUCT_CHECK_HOURS ?? 6), // 0 = only when someone clicks "Check website now"
   wpWebhookSecret: process.env.WP_WEBHOOK_SECRET || '',
   scrapeDir: process.env.SCRAPE_DIR || '../reference/website-scrape-2026-10-01',
 

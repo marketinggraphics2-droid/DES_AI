@@ -5,25 +5,30 @@ import { Router } from 'express';
 import { cfg } from './config.js';
 import { q, decrypt } from './db.js';
 import { embed, toVector } from './embeddings.js';
-import { PRODUCTS, detectProduct, search, glossaryHits, facts, goldenMatches, productNotes, contentWords, phraseScore } from './retrieval.js';
+import { detectProduct, search, glossaryHits, facts, goldenMatches, productNotes, contentWords, phraseScore } from './retrieval.js';
 import { stablePrompt, buildContext } from './prompt.js';
 import { answer } from './llm.js';
 import { detectLang, filterOutput, CANNED } from './guardrails.js';
 import { loadSites, toOrigin } from './sites.js';
 import { audit } from './auth.js';
+import { productNames, allProducts, updateProduct } from './products.js';
+import { checkProducts, lastProductCheck } from './product-sync.js';
 import { publish, streamHandler } from './events.js';
+import { addMessage, handBack } from './log.js';
 
 export const adminRouter = Router();
 const GENERAL = 'General'; // approved answers / questions not tied to one product
-const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'closed'];
+const LEAD_STATUSES = ['new', 'contacted', 'call_again', 'qualified', 'not_interested']; // new = not called yet; contacted = spoke with them; qualified is set by hand
 
 // conversations of the same person as visitor $2: same visitor row, same phone (person_key), or same email on another sign-up
 const SAME_PERSON = `(c.visitor_id = $2 or exists (select 1 from visitors me where me.id = $2 and ((me.person_key is not null and v.person_key = me.person_key) or (me.email_hash is not null and v.email_hash = me.email_hash))))`;
-const MSG_COLS = 'id, seq, role, kind, source, content, original_content, incomplete, delivered, tool_name, tool_input, blocked_reason, product, golden_ids, tokens_in, tokens_out, cost_usd, created_at';
+const MSG_COLS = 'id, seq, role, kind, source, author, content, original_content, incomplete, delivered, tool_name, tool_input, blocked_reason, product, golden_ids, tokens_in, tokens_out, cost_usd, created_at';
 // sign-in and permissions: adminAuth (auth.js) runs before this router
 const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
 const daysOf = (req) => Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
 const productParam = (name) => (name === GENERAL ? null : name);
+/** Any product in the list, also switched-off ones and ones whose page left the website (their history stays reachable). */
+const knownProduct = (name) => name === GENERAL || allProducts().some((p) => p.name === name);
 const clean = (s, max) => String(s ?? '').trim().slice(0, max);
 const cleanVariations = (v) => (Array.isArray(v) ? v.join('\n') : String(v ?? '')).split('\n').map((s) => s.trim().slice(0, 300)).filter(Boolean).slice(0, 30).join('\n') || null;
 
@@ -45,8 +50,8 @@ adminRouter.get('/overview', wrap(async (req, res) => {
       (select count(distinct visitor_id) from conversations where turns > 0 and started_at > ${since})::int visitors,
       (select count(*) from messages where role='user' and created_at > ${since})::int questions,
       (select count(*) from leads where created_at > ${since})::int leads,
+      (select count(*) from leads where qualified_at > ${since})::int qualified,
       (select count(*) from leads where demo_requested and updated_at > ${since})::int demos,
-      (select count(*) from handoffs where created_at > ${since})::int handoffs,
       (select count(*) from messages where role='assistant' and blocked_reason is not null and created_at > ${since})::int blocked,
       (select count(*) from messages where role='assistant' and golden_ids is not null and created_at > ${since})::int approved_used,
       (select count(*) from feedback where kind='thumb' and thumb=1 and created_at > ${since})::int thumbs_up,
@@ -81,10 +86,9 @@ adminRouter.get('/activity', wrap(async (req, res) => {
     union all
     (select 'lead', l.updated_at, v.name, l.conversation_id, case when l.demo_requested then 'demo' else l.status end,
             concat_ws(' · ', array_to_string(l.product_interest, ', '), l.need)
-       from leads l join visitors v on v.id=l.visitor_id order by l.updated_at desc limit 25)
-    union all
-    (select 'handoff', h.created_at, v.name, h.conversation_id, 'handoff', h.reason
-       from handoffs h join conversations c on c.id=h.conversation_id join visitors v on v.id=c.visitor_id order by h.created_at desc limit 25)
+       from leads l join visitors v on v.id=l.visitor_id
+       where l.need is not null or l.demo_requested or coalesce(cardinality(l.product_interest), 0) > 0 or l.status <> 'new'
+       order by l.updated_at desc limit 25)
     union all
     (select 'feedback', f.created_at, v.name, f.conversation_id,
             case when f.kind='survey' then 'rating' when f.thumb=1 then 'up' else 'down' end,
@@ -96,25 +100,63 @@ adminRouter.get('/activity', wrap(async (req, res) => {
 }));
 
 // ---------------- conversations ----------------
-// lead filter: '' = all chats · lead = has a lead · uncalled = lead without any remark yet · new / contacted / qualified / closed
-const LEAD_FILTERS = ['lead', 'uncalled', ...LEAD_STATUSES];
+// lead filter: '' = everyone · lead = has a lead (every sign-up has one) · uncalled = not called yet and no remark · new / call_again / qualified / not_interested
+// tocall = the call queue. Not called yet: now. Call again: at its time (no time = now; after "No answer" the retry schedule).
+// Contacted: once more for a follow-up, 2 working days later. Qualified (counted, Sales takes over) and Not interested: never.
+const LEAD_FILTERS = ['lead', 'uncalled', 'tocall', ...LEAD_STATUSES];
+const TO_CALL = `((l.status = 'new' and not exists(select 1 from remarks r where r.conversation_id=c.id)) or (l.status = 'call_again' and coalesce(l.next_action_at, now()) <= now()) or (l.status = 'contacted' and l.next_action_at <= now()))`;
+const QUEUE_ORDER = 'l.next_action_at asc nulls last, c.started_at desc'; // due follow-ups first (oldest due first), then new leads, newest first
+/** Filters shared by the list and the chip counts. status / product may be comma lists; days = started in the last N days. */
+const CHAT_STATUSES = ['open', 'closed', 'ended'];
+function conversationFilters(req) {
+  const list = (v, max) => String(v || '').split(',').map((x) => clean(x, max)).filter(Boolean).slice(0, 30);
+  const status = list(req.query.status, 20).filter((s) => CHAT_STATUSES.includes(s));
+  const product = list(req.query.product, 60);
+  const days = parseInt(req.query.days, 10);
+  return {
+    status: status.length ? status : null, search: req.query.q ? `%${clean(req.query.q, 100)}%` : null, product: product.length ? product : null,
+    all: req.query.all === '1', days: days > 0 ? Math.min(3650, days) : null,
+  };
+}
+// $1 status[] · $2 search · $3 product[] · $4 include empty chats · $5 days · $6 lead filter
+const CONV_WHERE = `($4::boolean or c.turns > 0 or l.id is not null)
+      and ($1::text[] is null or c.status = any($1))
+      and ($2::text is null or v.name ilike $2 or l.company ilike $2 or exists(select 1 from messages m where m.conversation_id=c.id and m.content ilike $2) or exists(select 1 from remarks r where r.conversation_id=c.id and r.body ilike $2))
+      and ($3::text[] is null or exists(select 1 from messages m where m.conversation_id=c.id and m.product = any($3)) or l.product_interest && $3)
+      and ($5::int is null or c.started_at > now() - make_interval(days => $5))
+      and ($6::text is null or ($6 = 'lead' and l.id is not null) or ($6 = 'uncalled' and l.status = 'new' and not exists(select 1 from remarks r where r.conversation_id=c.id)) or ($6 = 'tocall' and ${TO_CALL}) or l.status = any(string_to_array($6, ',')))`; // $6 may also be several statuses: 'call_again,qualified'
+const CONV_SORT = {
+  newest: 'c.started_at desc', oldest: 'c.started_at asc',
+  followup: `(l.status = 'new' and not exists(select 1 from remarks r where r.conversation_id=c.id)) desc, (l.status = 'new') desc, c.started_at asc`,
+  questions: 'c.turns desc, c.started_at desc',
+};
+// counts for the quick chips (All · Not called yet · Call again · Qualified · Not interested) under the other filters
+adminRouter.get('/conversation-counts', wrap(async (req, res) => {
+  const f = conversationFilters(req);
+  const r = (await q(`select count(*)::int "all", count(l.id)::int lead,
+      count(*) filter (where l.status = 'new' and not exists(select 1 from remarks r where r.conversation_id=c.id))::int uncalled,
+      count(*) filter (where ${TO_CALL})::int tocall,
+      count(*) filter (where l.status='new')::int new, count(*) filter (where l.status='contacted')::int contacted, count(*) filter (where l.status='call_again')::int call_again,
+      count(*) filter (where l.status='qualified')::int qualified, count(*) filter (where l.status='not_interested')::int not_interested
+    from conversations c join visitors v on v.id=c.visitor_id left join leads l on l.conversation_id=c.id
+    where ${CONV_WHERE}`, [f.status, f.search, f.product, f.all, f.days, null])).rows[0];
+  res.json(r);
+}));
 adminRouter.get('/conversations', wrap(async (req, res) => {
-  const status = ['open', 'handed_off', 'closed', 'ended'].includes(req.query.status) ? req.query.status : null;
-  const search_ = req.query.q ? `%${clean(req.query.q, 100)}%` : null;
-  const product = req.query.product ? clean(req.query.product, 60) : null;
-  const lead = LEAD_FILTERS.includes(req.query.lead) ? req.query.lead : null;
+  const f = conversationFilters(req);
+  const raw = String(req.query.lead || ''), parts = raw.split(',').filter(Boolean);
+  const lead = LEAD_FILTERS.includes(raw) ? raw : parts.length && parts.every((p) => LEAD_STATUSES.includes(p)) ? parts.join(',') : null;
   const limit = Math.min(200, parseInt(req.query.limit, 10) || 50);
   const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+  // the call queue keeps its own order unless another sort is picked
+  const order = lead === 'tocall' && (!req.query.sort || req.query.sort === 'newest') ? QUEUE_ORDER : CONV_SORT[req.query.sort] || CONV_SORT.newest;
   // the same filters for the page and the total; leads are shown even when the chat had no messages
-  const where = `($6::boolean or c.turns > 0 or l.id is not null)
-      and ($1::text is null or c.status=$1)
-      and ($2::text is null or v.name ilike $2 or l.company ilike $2 or exists(select 1 from messages m where m.conversation_id=c.id and m.content ilike $2) or exists(select 1 from remarks r where r.conversation_id=c.id and r.body ilike $2))
-      and ($3::text is null or exists(select 1 from messages m where m.conversation_id=c.id and m.product=$3) or $3 = any(l.product_interest))
-      and ($7::text is null or ($7 = 'lead' and l.id is not null) or ($7 = 'uncalled' and l.id is not null and not exists(select 1 from remarks r where r.conversation_id=c.id)) or l.status = $7)`;
-  const params = [status, search_, product, limit, offset, req.query.all === '1', lead];
+  const where = CONV_WHERE;
+  const params = [f.status, f.search, f.product, f.all, f.days, lead, limit, offset];
   const rows = (await q(`
-    select c.id, c.started_at, c.ended_at, c.status, c.lang, c.turns, c.summary, v.name, v.phone, v.phone_type, v.email, v.email_type,
+    select c.id, c.started_at, c.ended_at, c.status, c.lang, c.turns, c.summary, c.agent_id, c.agent_name, v.name, v.phone, v.phone_type, v.email, v.email_type,
       l.id lead_id, l.status lead_status, l.need, l.company, l.industry, l.team_size, l.product_interest, l.demo_requested, v.marketing_opt_in,
+      l.next_action_at, l.attempts, l.last_attempt_at, l.lost_reason,
       (select count(*) from remarks r where r.conversation_id=c.id)::int remarks_count,
       (select json_build_object('body', r.body, 'by', coalesce(r.user_name, r.user_email), 'at', r.created_at) from remarks r where r.conversation_id=c.id order by r.id desc limit 1) last_remark,
       (select m.content from messages m where m.conversation_id=c.id and m.role='user' and m.kind='chat' order by m.seq, m.id limit 1) first_question,
@@ -126,11 +168,108 @@ adminRouter.get('/conversations', wrap(async (req, res) => {
       (select round(avg(f.rating), 1) from feedback f where f.conversation_id=c.id and f.kind='survey')::float rating
     from conversations c join visitors v on v.id=c.visitor_id left join leads l on l.conversation_id=c.id
     where ${where}
-    order by c.started_at desc limit $4 offset $5`, params)).rows;
+    order by ${order} limit $7 offset $8`, params)).rows;
   const total = (await q(`select count(*)::int n from conversations c join visitors v on v.id=c.visitor_id left join leads l on l.conversation_id=c.id
-    where ${where} and $4::int >= 0 and $5::int >= 0`, params)).rows[0].n; // limit / offset unused here, but every parameter needs a type
+    where ${where}`, params.slice(0, 6))).rows[0].n;
   res.set('x-total-count', String(total)).set('access-control-expose-headers', 'x-total-count');
   res.json(rows.map((x) => ({ ...x, phone: decrypt(x.phone), email: decrypt(x.email) })));
+}));
+
+// ---------------- call outcomes ----------------
+// One click records the call: a remark, the lead's status and what happens next. Undo puts the lead back as it was.
+const OUTCOMES = {
+  qualified: { label: 'Qualified', status: 'qualified' },
+  callback: { label: 'Call again', status: 'call_again', needsTime: true },
+  not_interested: { label: 'Not interested', status: 'not_interested' },
+  no_answer: { label: 'No answer', status: 'call_again', attempt: true },
+  wrong_number: { label: 'Wrong number', status: 'not_interested' },
+};
+const MAX_ATTEMPTS = 5; // after this many unanswered calls the lead is set aside as unreachable
+const MANILA = 8 * 3600e3; // UTC+8, no daylight saving
+/** 9 AM Manila, `days` working days after `from` (Mon–Sat; Sunday skipped). */
+function workingMorning(from, days) {
+  const d = new Date(from + MANILA);
+  let left = days; while (left > 0) { d.setUTCDate(d.getUTCDate() + 1); if (d.getUTCDay() !== 0) left--; }
+  d.setUTCHours(9, 0, 0, 0);
+  return new Date(d.getTime() - MANILA);
+}
+/** When to try again after an unanswered call: 4 h, then the next working morning, then every 2 working days. */
+const retryAt = (attempts, now) => (attempts <= 1 ? new Date(now + 4 * 3600e3) : workingMorning(now, attempts === 2 ? 1 : 2));
+const manilaTime = new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Manila' });
+const LEAD_STATE = ['status', 'next_action_at', 'attempts', 'last_attempt_at', 'lost_reason', 'qualified_at'];
+const QUALIFIED_AT = "case when $2 = 'qualified' then coalesce(case when status = 'qualified' then qualified_at end, now()) end"; // $2 = the new status
+adminRouter.post('/conversations/:id/outcome', wrap(async (req, res) => {
+  const key = String(req.body?.outcome || ''), o = OUTCOMES[key];
+  if (!o) return res.status(400).json({ error: 'bad_outcome' });
+  const lead = (await q('select * from leads where conversation_id=$1', [req.params.id])).rows[0];
+  if (!lead) return res.status(404).json({ error: 'no_lead' });
+  const note = clean(req.body?.note, 2000), reason = clean(req.body?.reason, 80) || null;
+  let at = req.body?.at ? new Date(req.body.at) : null; if (at && Number.isNaN(at.getTime())) at = null;
+  if (o.needsTime && !at) return res.status(400).json({ error: 'time_needed', message: 'Pick when to call back.' });
+  const now = Date.now(), previous = Object.fromEntries(LEAD_STATE.map((k) => [k, lead[k] ?? null]));
+  let status = o.status, attempts = (lead.attempts || 0) + (o.attempt ? 1 : 0), next = null, lost = null;
+  if (key === 'no_answer') {
+    if (attempts >= MAX_ATTEMPTS) { status = 'not_interested'; lost = `unreachable (no answer after ${attempts} calls)`; } else next = retryAt(attempts, now);
+  } else if (key === 'callback') next = at;
+  else if (key === 'not_interested') lost = reason || 'not interested';
+  else if (key === 'wrong_number') lost = 'wrong number';
+  const when = next ? manilaTime.format(next) : null;
+  const what = key === 'no_answer' ? (lost ? `No answer (${attempts} calls): set aside as unreachable` : `No answer (call ${attempts}). Next try ${when}`)
+    : key === 'callback' ? `Call again ${when}`
+    : key === 'qualified' ? 'Qualified'
+    : key === 'not_interested' ? `Not interested${reason ? ` (${reason})` : ''}` : 'Wrong number';
+  const body = note ? `${what}. ${note}` : what;
+  const r = (await q(`insert into remarks(conversation_id, user_id, user_email, user_name, body, outcome) values($1,$2,$3,$4,$5,$6)
+    returning id, user_id, user_email, user_name, body, outcome, created_at`, [req.params.id, req.user.id, req.user.email, req.user.name || null, body, key])).rows[0];
+  const l = (await q(`update leads set status=$2, next_action_at=$3, attempts=$4, last_attempt_at = case when $5 then now() else last_attempt_at end,
+    lost_reason=$6, qualified_at = ${QUALIFIED_AT}, updated_at=now() where id=$1 returning *`,
+    [lead.id, status, next, attempts, !!o.attempt, lost])).rows[0];
+  publish('remark.new', { conversation_id: req.params.id, ...r, id: Number(r.id) });
+  publish('lead.update', { id: l.id, conversation_id: req.params.id, status: l.status, next_action_at: l.next_action_at, attempts: l.attempts });
+  res.json({ remark: { ...r, id: Number(r.id) }, lead: l, previous });
+}));
+adminRouter.post('/conversations/:id/outcome/undo', wrap(async (req, res) => {
+  const rid = Number(req.body?.remark_id), p = req.body?.previous || {};
+  if (!rid || !LEAD_STATUSES.includes(p.status)) return res.status(400).json({ error: 'bad_undo' });
+  const del = await q('delete from remarks where id=$1 and conversation_id=$2 and outcome is not null returning id', [rid, req.params.id]);
+  if (!del.rowCount) return res.status(404).json({ error: 'not_found' });
+  const ts = (v) => (v && !Number.isNaN(new Date(v).getTime()) ? new Date(v) : null);
+  const l = (await q(`update leads set status=$2, next_action_at=$3, attempts=$4, last_attempt_at=$5, lost_reason=$6, qualified_at=$7, updated_at=now() where conversation_id=$1 returning *`,
+    [req.params.id, p.status, ts(p.next_action_at), Math.max(0, parseInt(p.attempts, 10) || 0), ts(p.last_attempt_at), p.lost_reason ? clean(p.lost_reason, 120) : null, p.status === 'qualified' ? ts(p.qualified_at) || new Date() : null])).rows[0];
+  publish('remark.deleted', { conversation_id: req.params.id, id: rid });
+  if (l) publish('lead.update', { id: l.id, conversation_id: req.params.id, status: l.status, next_action_at: l.next_action_at, attempts: l.attempts });
+  res.json({ ok: true, lead: l || null });
+}));
+
+// ---------------- live takeover ----------------
+// A team member takes over a chat that is happening: DES stays silent, the visitor sees their messages, "Hand back" ends it.
+const agentFirstName = (u) => String(u.name || u.email.split('@')[0]).trim().split(/\s+/)[0];
+adminRouter.post('/conversations/:id/takeover', wrap(async (req, res) => {
+  const c = (await q('select id, status, agent_id, agent_name from conversations where id=$1', [req.params.id])).rows[0];
+  if (!c) return res.status(404).json({ error: 'not_found' });
+  if (c.status === 'ended') return res.status(409).json({ error: 'chat_ended', message: 'DES ended this chat, so it cannot be taken over.' });
+  const name = agentFirstName(req.user);
+  await q('update conversations set agent_id=$2, agent_name=$3, agent_last_at=now() where id=$1', [c.id, req.user.id, name]);
+  if (c.agent_id !== req.user.id) await addMessage(c.id, { role: 'system', kind: 'event', source: 'agent', author: name, content: `${name} from DynamIQ joined the chat` });
+  publish('conversation.update', { id: c.id, agent_id: req.user.id, agent_name: name });
+  await audit(req, 'chat.takeover', c.id, { from: c.agent_name || 'DES' });
+  res.json({ ok: true, agent_id: req.user.id, agent_name: name });
+}));
+adminRouter.post('/conversations/:id/reply', wrap(async (req, res) => {
+  const text = clean(req.body?.text, 2000);
+  if (!text) return res.status(400).json({ error: 'empty' });
+  const c = (await q('select id, agent_id, agent_name from conversations where id=$1', [req.params.id])).rows[0];
+  if (!c) return res.status(404).json({ error: 'not_found' });
+  if (c.agent_id !== req.user.id) return res.status(409).json({ error: 'not_yours', message: c.agent_id ? `${c.agent_name} is chatting now. Take over first.` : 'Take over the chat first.' });
+  const m = await addMessage(c.id, { role: 'assistant', kind: 'chat', source: 'agent', author: c.agent_name, content: text });
+  await q('update conversations set agent_last_at=now() where id=$1', [c.id]);
+  res.json({ ok: true, id: m.id, seq: m.seq });
+}));
+adminRouter.post('/conversations/:id/handback', wrap(async (req, res) => {
+  const c = (await q('select id, agent_name from conversations where id=$1', [req.params.id])).rows[0];
+  if (!c) return res.status(404).json({ error: 'not_found' });
+  if (await handBack(c.id)) await audit(req, 'chat.handback', c.id, { from: c.agent_name });
+  res.json({ ok: true });
 }));
 
 adminRouter.get('/conversations/:id/detail', wrap(async (req, res) => {
@@ -141,11 +280,10 @@ adminRouter.get('/conversations/:id/detail', wrap(async (req, res) => {
   const golden = ids.length ? (await q('select id, question, product from golden_answers where id = any($1::bigint[])', [ids])).rows : [];
   const feedback = (await q('select * from feedback where conversation_id=$1 order by id', [req.params.id])).rows;
   const lead = (await q('select * from leads where conversation_id=$1', [req.params.id])).rows[0] || null;
-  const handoffs = (await q('select * from handoffs where conversation_id=$1 order by id', [req.params.id])).rows;
   const remarks = (await q('select id, user_id, user_email, user_name, body, created_at from remarks where conversation_id=$1 order by id', [req.params.id])).rows;
   const others = (await q(`select count(*)::int n from conversations c join visitors v on v.id=c.visitor_id
                            where c.id <> $1 and ${SAME_PERSON}`, [req.params.id, conv.visitor_id])).rows[0].n;
-  res.json({ ...conv, phone: decrypt(conv.phone), email: decrypt(conv.email), messages, golden, feedback, lead, handoffs, remarks, other_conversations: others });
+  res.json({ ...conv, phone: decrypt(conv.phone), email: decrypt(conv.email), messages, golden, feedback, lead, remarks, other_conversations: others });
 }));
 
 // Everything the same person said across visits and sign-ups (same visitor, or same contact on a new sign-up), oldest first.
@@ -161,9 +299,12 @@ adminRouter.get('/conversations/:id/history', wrap(async (req, res) => {
 adminRouter.put('/leads/:id', wrap(async (req, res) => {
   const status = req.body?.status;
   if (!LEAD_STATUSES.includes(status)) return res.status(400).json({ error: 'bad_status' });
-  const l = (await q('update leads set status=$2, updated_at=now() where id=$1 returning conversation_id', [req.params.id, status])).rows[0];
-  if (l) publish('lead.update', { id: req.params.id, conversation_id: l.conversation_id, status });
-  res.json({ ok: true });
+  // when the lead comes back to "To call": contacted in 2 working days; call again right away; the others not at all
+  const next = status === 'contacted' ? workingMorning(Date.now(), 2) : null;
+  const l = (await q(`update leads set status=$2, next_action_at=$3, lost_reason = case when $2 = 'not_interested' then lost_reason end, qualified_at = ${QUALIFIED_AT}, updated_at=now()
+    where id=$1 returning *`, [req.params.id, status, next])).rows[0];
+  if (l) publish('lead.update', { id: req.params.id, conversation_id: l.conversation_id, status, next_action_at: l.next_action_at });
+  res.json({ ok: true, lead: l || null });
 }));
 
 // ---------------- remarks (call notes by the sales / telemarketing team) ----------------
@@ -176,10 +317,10 @@ adminRouter.post('/conversations/:id/remarks', wrap(async (req, res) => {
   if (!(await q('select 1 from conversations where id=$1', [req.params.id])).rowCount) return res.status(404).json({ error: 'not_found' });
   const r = (await q('insert into remarks(conversation_id, user_id, user_email, user_name, body) values($1,$2,$3,$4,$5) returning id, user_id, user_email, user_name, body, created_at',
     [req.params.id, req.user.id, req.user.email, req.user.name || null, body])).rows[0];
-  // a remark means the team has acted on the lead: move a "new" lead to "contacted"
+  // a remark means someone called: a lead not called yet moves to "call again" (the caller sets Qualified / Not interested)
   if (req.body?.contacted !== false) {
-    const l = (await q(`update leads set status='contacted', updated_at=now() where conversation_id=$1 and status='new' returning id`, [req.params.id])).rows[0];
-    if (l) publish('lead.update', { id: l.id, conversation_id: req.params.id, status: 'contacted' });
+    const l = (await q(`update leads set status='contacted', next_action_at=$2, updated_at=now() where conversation_id=$1 and status='new' returning id, next_action_at`, [req.params.id, workingMorning(Date.now(), 2)])).rows[0];
+    if (l) publish('lead.update', { id: l.id, conversation_id: req.params.id, status: 'contacted', next_action_at: l.next_action_at });
   }
   publish('remark.new', { conversation_id: req.params.id, ...r, id: Number(r.id) });
   res.json({ ...r, id: Number(r.id) });
@@ -196,26 +337,43 @@ adminRouter.delete('/remarks/:id', wrap(async (req, res) => {
 // ---------------- products (fine-tuning) ----------------
 adminRouter.get('/products', wrap(async (_req, res) => {
   const by = async (sql) => Object.fromEntries((await q(sql)).rows.map((r) => [r.k ?? GENERAL, r]));
-  const [chunks, golden, questions, down, leadsBy, notes] = await Promise.all([
+  const [chunks, golden, questions, down, leadsBy, notes, cover, pages] = await Promise.all([
     by(`select product k, count(*)::int chunks, count(distinct document_id)::int docs from kb_chunks where product is not null group by product`),
     by(`select coalesce(product, '${GENERAL}') k, count(*) filter (where active is not false)::int active, count(*)::int total, coalesce(sum(use_count), 0)::int used from golden_answers group by 1`),
     by(`select coalesce(product, '${GENERAL}') k, count(*)::int n from messages where role='user' and created_at > now() - interval '30 days' group by 1`),
     by(`select coalesce(m.product, '${GENERAL}') k, count(*)::int n from feedback f join messages m on m.id=f.message_id where f.thumb=-1 group by 1`),
     by(`select p k, count(*)::int n from leads, unnest(product_interest) p group by p`),
     by(`select product k, length(trim(notes)) > 0 has, updated_at from product_notes`),
+    // coverage: of DES's replies in 30 days, how many were based on an approved answer
+    by(`select coalesce(product, '${GENERAL}') k, count(*)::int replies, count(*) filter (where cardinality(golden_ids) > 0)::int covered
+        from messages where role='assistant' and created_at > now() - interval '30 days' group by 1`),
+    by(`select c.product k, max(d.updated_at) read_at from kb_chunks c join kb_documents d on d.id=c.document_id where c.product is not null and d.kind='product' group by 1`),
   ]);
-  res.json([...PRODUCTS, GENERAL].map((p) => ({
+  const meta = Object.fromEntries(allProducts().map((p) => [p.name, p]));
+  res.json([...allProducts().map((p) => p.name), GENERAL].map((p) => ({
     product: p,
+    ...(meta[p] ? { aliases: meta[p].aliases || [], url: meta[p].slug ? `${cfg.siteOrigin.replace(/\/$/, '')}/products/${meta[p].slug}/` : null,
+      active: meta[p].active, on_website: meta[p].on_website, live: meta[p].active && meta[p].on_website, needs_review: meta[p].needs_review, added_at: meta[p].created_at,
+      website_name: meta[p].website_name || null, description: meta[p].description || null, logo_url: meta[p].logo_url || null, image_url: meta[p].image_url || null,
+      last_seen_at: meta[p].last_seen_at || null, page_read_at: pages[p]?.read_at || null } : { live: true }),
     docs: chunks[p]?.docs || 0, chunks: chunks[p]?.chunks || 0,
     approved: golden[p]?.active || 0, approved_total: golden[p]?.total || 0, approved_used: golden[p]?.used || 0,
     questions_30d: questions[p]?.n || 0, thumbs_down: down[p]?.n || 0, leads: leadsBy[p]?.n || 0,
     has_notes: !!notes[p]?.has, notes_updated_at: notes[p]?.updated_at || null,
+    replies_30d: cover[p]?.replies || 0, covered_30d: cover[p]?.covered || 0,
   })));
+}));
+
+/** "Check for new products": read the website's /products/ page now and add any product not seen before. */
+adminRouter.post('/products/check', wrap(async (req, res) => {
+  const r = await checkProducts({ source: 'products-check' });
+  if (r.ok && (r.added.length || r.gone.length)) await audit(req, 'products.checked', null, { added: r.added, gone: r.gone });
+  res.json(r);
 }));
 
 adminRouter.get('/products/:name', wrap(async (req, res) => {
   const name = clean(req.params.name, 60);
-  if (![...PRODUCTS, GENERAL].includes(name)) return res.status(404).json({ error: 'unknown_product' });
+  if (!knownProduct(name)) return res.status(404).json({ error: 'unknown_product' });
   const p = productParam(name);
   const notes = (await q('select notes, updated_at from product_notes where product=$1', [name])).rows[0] || { notes: '', updated_at: null };
   const golden = (await q(`select id, question, variations, ideal_answer, product, active, use_count, last_used_at, created_at, updated_at, message_id
@@ -235,9 +393,19 @@ adminRouter.get('/products/:name', wrap(async (req, res) => {
 
 adminRouter.put('/products/:name/notes', wrap(async (req, res) => {
   const name = clean(req.params.name, 60);
-  if (![...PRODUCTS, GENERAL].includes(name)) return res.status(404).json({ error: 'unknown_product' });
+  if (!knownProduct(name)) return res.status(404).json({ error: 'unknown_product' });
   await q(`insert into product_notes(product, notes) values($1,$2) on conflict(product) do update set notes=excluded.notes, updated_at=now()`, [name, clean(req.body?.notes, 6000)]);
   res.json({ ok: true });
+}));
+
+/** Name, nicknames, product page, on/off, "checked". A rename carries over to leads, answers, notes and history. */
+adminRouter.put('/products/:name', wrap(async (req, res) => {
+  const name = clean(req.params.name, 60);
+  const b = req.body || {};
+  const r = await updateProduct(name, { name: b.name, aliases: b.aliases, url: b.url, active: b.active, reviewed: b.reviewed });
+  if (r.error) return res.status(r.status).json({ error: r.error });
+  await audit(req, 'product.updated', name, { name: r.product.name !== name ? r.product.name : undefined, aliases: b.aliases !== undefined ? r.product.aliases : undefined, active: b.active, url: b.url });
+  res.json(r.product);
 }));
 
 // ---------------- approved answers ----------------
@@ -252,7 +420,7 @@ adminRouter.post('/golden', wrap(async (req, res) => {
   const question = clean(req.body?.question, 500), ideal = clean(req.body?.ideal_answer, 3000);
   if (!question || !ideal) return res.status(400).json({ error: 'question_and_answer_required' });
   const product = req.body?.product && req.body.product !== GENERAL ? clean(req.body.product, 60) : null;
-  if (product && !PRODUCTS.includes(product)) return res.status(400).json({ error: 'unknown_product' });
+  if (product && !knownProduct(product)) return res.status(400).json({ error: 'unknown_product' });
   const msgId = Number.isInteger(req.body?.message_id) ? req.body.message_id : null;
   const row = (await q(`insert into golden_answers(message_id, question, variations, context, ideal_answer, product, reviewed_by, active, embedding)
                         values($1,$2,$3,$4,$5,$6,$7,$8,$9::vector) returning id`,
@@ -273,7 +441,7 @@ adminRouter.put('/golden/:id', wrap(async (req, res) => {
   let product = cur.product;
   if (req.body?.product !== undefined) {
     product = req.body.product && req.body.product !== GENERAL ? clean(req.body.product, 60) : null;
-    if (product && !PRODUCTS.includes(product)) return res.status(400).json({ error: 'unknown_product' });
+    if (product && !knownProduct(product)) return res.status(400).json({ error: 'unknown_product' });
   }
   const active = req.body?.active !== undefined ? !!req.body.active : cur.active !== false;
   const variations = req.body?.variations !== undefined ? cleanVariations(req.body.variations) : cur.variations;
@@ -339,7 +507,9 @@ adminRouter.get('/prompt', wrap(async (_req, res) => {
 }));
 
 adminRouter.get('/status', wrap(async (_req, res) => {
-  res.json({ model: cfg.model, gateway: cfg.gateway.url, mock: !cfg.gateway.key, embeddings: cfg.embeddings.provider, golden_min_score: cfg.goldenMinScore, daily_budget_usd: cfg.dailyBudgetUsd, products: [...PRODUCTS, GENERAL] });
+  res.json({ model: cfg.model, gateway: cfg.gateway.url, mock: !cfg.gateway.key, embeddings: cfg.embeddings.provider, golden_min_score: cfg.goldenMinScore, daily_budget_usd: cfg.dailyBudgetUsd, products: [...productNames(), GENERAL],
+    products_new: allProducts().filter((p) => p.needs_review && p.active && p.on_website).map((p) => p.name),
+    products_check: await lastProductCheck().catch(() => null), products_check_hours: cfg.productCheckHours });
 }));
 
 /** Which approved answers would a question match, and how strongly? (no AI call) */

@@ -7,10 +7,9 @@ import { search, glossaryHits, facts, detectProduct, goldenMatches, productNotes
 import { stablePrompt, buildContext, invalidatePrompt } from './prompt.js';
 import { answer, summarize, classifyLLM } from './llm.js';
 import { maskPII, injectionScore, classify, detectLang, filterOutput, CANNED, MAX_INPUT_CHARS } from './guardrails.js';
-import { handoff } from './tools.js';
 import { validateName, validatePhone, validateEmail } from './contact.js';
 import { ingestUrl, sweepSitemap } from './ingest.js';
-import { addMessage, serialize, maskWidgetText } from './log.js';
+import { addMessage, serialize, maskWidgetText, handBack } from './log.js';
 import { audit } from './auth.js';
 import { publish, touch, typing } from './events.js';
 
@@ -84,7 +83,7 @@ r.post('/session', async (req, res) => {
   const ip = ipHash(req);
   if (await isBlocked('ip:' + ip)) return res.status(429).json({ error: 'blocked' });
   if (!(await verifyTurnstile(turnstile, req.ip))) return res.status(400).json({ error: 'turnstile_failed' });
-  // name + mobile number are required before the AI; email is optional (the widget asks for it only in the demo / handoff form)
+  // name + mobile number are required before the AI; email is optional (the widget asks for it only in the demo form)
   const nm = validateName(name);
   if (!nm.ok) return res.status(400).json({ error: nm.code });
   if (!consent || consent.version !== cfg.consentVersion) return res.status(400).json({ error: 'consent_required', consent_version: cfg.consentVersion });
@@ -108,6 +107,8 @@ r.post('/session', async (req, res) => {
                      values($1,$14,$15,$2,$3,$4,$5,$6,$7,$2,$3,$4,now(),$8,$9,$10,$11,$12,$13,$3) returning id`,
     [cleanName, encrypt(ph.value), phoneHash, ph.type, em.value ? encrypt(em.value) : null, emailHash, em.type, consent.version, consent.method || 'chip', !!marketing_opt_in, lang === 'fil' ? 'fil' : 'en', (page_url || '').slice(0, 500), ip, firstName, lastName]);
   const conv = await q('insert into conversations(visitor_id, lang) values($1,$2) returning id, started_at', [v.rows[0].id, lang === 'fil' ? 'fil' : 'en']);
+  // every sign-up is a lead: name + mobile number are enough for the team to call, even if no question follows
+  await q('insert into leads(visitor_id, conversation_id) values($1,$2) on conflict do nothing', [v.rows[0].id, conv.rows[0].id]);
   publish('conversation.new', { id: conv.rows[0].id, visitor_id: v.rows[0].id, name: cleanName, phone: ph.value, phone_type: ph.type, email: em.value, status: 'open', started_at: conv.rows[0].started_at, lang: lang === 'fil' ? 'fil' : 'en' });
   await hit('ip:' + ip, 'session'); for (const h of [phoneHash, emailHash].filter(Boolean)) await hit('contact:' + h, 'session');
   // what the visitor saw and typed before the session existed (greeting, sign-up), so the dashboard has the whole chat
@@ -149,7 +150,7 @@ r.post('/session/phone', auth, async (req, res) => {
 r.post('/session/resume', auth, async (req, res) => {
   const resumeBan = await banUntil(banKeys(req, { vid: req.session.vid }));
   if (resumeBan) return res.status(403).json({ error: 'chat_ended', until: resumeBan });
-  const last = (await q(`select id from conversations where visitor_id=$1 and status in ('open','handed_off')
+  const last = (await q(`select id from conversations where visitor_id=$1 and status = 'open'
                          and coalesce(last_activity_at, started_at) > now() - make_interval(mins => $2) order by started_at desc limit 1`, [req.session.vid, cfg.resumeWindowMin])).rows[0];
   let cid = last?.id;
   if (!cid) {
@@ -169,7 +170,7 @@ r.post('/typing', auth, (req, res) => {
 });
 
 // ---------- widget log: bubbles the browser showed that the server did not produce ----------
-// Sign-up prompts, survey, handoff confirmation, error and timeout notices. Stored as kind='script' so they are
+// Sign-up prompts, survey, Sales contact, error and timeout notices. Stored as kind='script' so they are
 // visible in the dashboard but never sent to the AI. Contact details and card / ID numbers are masked.
 r.post('/log', auth, async (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : null;
@@ -189,6 +190,19 @@ r.post('/log', auth, async (req, res) => {
 });
 
 // ---------- chat (SSE) ----------
+// ---- live takeover: what a team member wrote, polled by the widget every few seconds while the chat is open ----
+const AGENT_IDLE_MIN = 15;
+r.post('/updates', auth, async (req, res) => {
+  const { cid } = req.session;
+  touch(cid); // an open chat window counts as "on the website now" in the dashboard
+  const conv = (await q('select last_seq, agent_name from conversations where id=$1', [cid])).rows[0];
+  if (!conv) return res.json({ cursor: 0, agent: null, items: [] });
+  const after = Number.isInteger(req.body?.after) ? req.body.after : null;
+  if (after === null) return res.json({ cursor: conv.last_seq || 0, agent: conv.agent_name, items: [] }); // first call: nothing old
+  const items = (await q(`select seq, role, author, content, created_at from messages where conversation_id=$1 and seq > $2 and source='agent' order by seq limit 50`, [cid, after])).rows;
+  res.json({ cursor: items.length ? items[items.length - 1].seq : after, agent: conv.agent_name, items });
+});
+
 r.post('/chat', auth, async (req, res) => {
   res.setHeader('content-type', 'text/event-stream'); res.setHeader('cache-control', 'no-cache'); res.flushHeaders();
   // the visitor closed the page / the widget gave up waiting: stop the AI call and remember the reply was not delivered
@@ -248,7 +262,7 @@ async function chatTurn(req, res, ac, isGone) {
 
   let streamed = '', saved = false;
   try {
-    const conv = (await q('select lang, turns, status from conversations where id=$1', [cid])).rows[0];
+    const conv = (await q('select lang, turns, status, agent_id, agent_name, agent_last_at from conversations where id=$1', [cid])).rows[0];
     if (!conv) { send('error', { code: 'no_conversation' }); return res.end(); }
     const lang = raw ? detectLang(raw) : conv.lang;
     const C = CANNED[lang] || CANNED.en;
@@ -271,8 +285,14 @@ async function chatTurn(req, res, ac, isGone) {
     const product = detectProduct(masked);
     await storeUser(masked, product);
     await q('update conversations set lang = $2 where id=$1', [cid, lang]);
+    // live takeover: a team member is chatting, so DES stays silent (the message shows live in their dashboard).
+    // A team member who has written nothing for AGENT_IDLE_MIN minutes is assumed gone: DES takes the chat back and answers.
+    if (conv.agent_id) {
+      if (conv.agent_last_at && Date.now() - new Date(conv.agent_last_at).getTime() > AGENT_IDLE_MIN * 60e3) await handBack(cid);
+      else { send('done', { text: '', agent: true, agent_name: conv.agent_name }); return res.end(); }
+    }
 
-    if (conv.turns + 1 > cfg.rate.maxTurns) { await handoff({ conversationId: cid, visitorId: vid }, 'turn cap'); send('text', { delta: C.trouble }); return finish(C.trouble, { blocked: 'turn_cap', lang }); }
+    if (conv.turns + 1 > cfg.rate.maxTurns) { send('text', { delta: C.trouble }); return finish(C.trouble, { blocked: 'turn_cap', lang }); }
     if (injectionScore(masked) >= 1) {
       const n = (await count('session:' + cid, 'inj', 3600)) + 1; await hit('session:' + cid, 'inj');
       if (n >= 3) await q(`insert into blocked(key, reason) values($1,'injection x3') on conflict do nothing`, ['session:' + cid]);
@@ -285,7 +305,7 @@ async function chatTurn(req, res, ac, isGone) {
     if (cls === 'support_request') { send('text', { delta: C.support }); return finish(C.support, { blocked: 'support', lang }); }
 
     const budget = await budgetState();
-    if (budget.ratio >= 1) { await handoff({ conversationId: cid, visitorId: vid }, 'budget exhausted'); send('text', { delta: C.budget }); return finish(C.budget, { blocked: 'budget', lang }); }
+    if (budget.ratio >= 1) { send('text', { delta: C.budget }); return finish(C.budget, { blocked: 'budget', lang }); }
 
     // retrieval: "auto" attaches the 6 best website sections to every message; "tool" lets the AI search only when needed
     // (mock mode has no tool loop, so it keeps auto)
@@ -335,9 +355,8 @@ async function chatTurn(req, res, ac, isGone) {
     if (!saved && userRowId && (streamed || isGone())) {
       try { await addMessage(cid, { role: 'assistant', content: prefix + streamed, incomplete: true, delivered: !isGone(), blocked_reason: isGone() ? 'visitor_left' : 'error' }); saved = true; } catch (e2) { console.error('partial reply not saved', e2.message); }
     }
-    if (isGone()) return; // nobody to answer, and not a fault worth a Sales email
+    if (isGone()) return; // nobody to answer
     console.error('chat error', e);
-    try { await handoff({ conversationId: cid, visitorId: vid }, 'system: ' + e.message); } catch { }
     if (e.code === 'gateway_credits') { // IQGateway wallet empty or daily cap reached: same polite text as our own budget cap
       const lang = detectLang(raw);
       const msg = (CANNED[lang] || CANNED.en).budget;
@@ -348,7 +367,7 @@ async function chatTurn(req, res, ac, isGone) {
   }
 }
 
-// ---------- feedback / handoff / end ----------
+// ---------- feedback / end ----------
 r.post('/feedback', auth, async (req, res) => {
   const { kind, trigger, rating, thumb, reasons, comment, resolved, dismissed, message_id } = req.body || {};
   if (!['survey', 'thumb', 'thumb_reason'].includes(kind)) return res.status(400).json({ error: 'bad_kind' });
@@ -357,10 +376,6 @@ r.post('/feedback', auth, async (req, res) => {
   if (thumb === -1) publish('review.count', {});
   publish('conversation.update', { id: req.session.cid, feedback: kind });
   res.json({ ok: true });
-});
-r.post('/handoff', auth, async (req, res) => {
-  const h = await handoff({ conversationId: req.session.cid, visitorId: req.session.vid }, String(req.body?.reason || 'visitor').slice(0, 200));
-  res.json({ ok: true, already: h.already });
 });
 r.post('/end', auth, async (req, res) => {
   const msgs = (await q(`select role, content from messages where conversation_id=$1 and role in ('user','assistant') order by seq, id`, [req.session.cid])).rows;
@@ -404,7 +419,7 @@ r.get('/admin/feedback/summary', async (_req, res) => {
   res.json({ ...s, reasons, blocked, usage });
 });
 r.get('/admin/review-queue', async (_req, res) => {
-  const rows = (await q(`select m.id message_id, m.conversation_id, m.content answer, m.product,
+  const rows = (await q(`select m.id message_id, m.conversation_id, m.content answer, m.product, f.created_at,
                          coalesce((select array_agg(distinct x) from feedback r, unnest(r.reasons) x where r.message_id = m.id and r.kind = 'thumb_reason'), f.reasons) reasons, f.rating, f.thumb,
                          (select content from messages u where u.conversation_id=m.conversation_id and u.role='user' and u.id < m.id order by u.id desc limit 1) question
                          from feedback f join messages m on m.id = f.message_id where (f.thumb = -1) and not exists (select 1 from golden_answers g where g.message_id = m.id)

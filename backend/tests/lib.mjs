@@ -41,7 +41,7 @@ export function createUser(env, role, email, password = PASSWORD) {
 export function testEnv(port, dbDir, extra = {}) {
   return {
     ...process.env, PORT: String(port), DATABASE_URL: 'pglite:' + dbDir, ADMIN_TOKEN: ADMIN, DES_TEST_HOOKS: '1',
-    TURNSTILE_SECRET: '', SMTP_HOST: '', PUBLIC_URL: '', WEBSITE_URL: '',
+    TURNSTILE_SECRET: '', SMTP_HOST: '', PUBLIC_URL: '', WEBSITE_URL: '', PRODUCT_CHECK_HOURS: '0',
     ALLOWED_ORIGINS: [process.env.ALLOWED_ORIGINS, 'http://localhost:' + port].filter(Boolean).join(','), // the test backend's own pages count as an approved site
     RATE_SESSIONS_PER_IP_DAY: '1000', RATE_SESSIONS_PER_CONTACT_DAY: '3', RATE_MSG_PER_10MIN: '30', ...extra,
   };

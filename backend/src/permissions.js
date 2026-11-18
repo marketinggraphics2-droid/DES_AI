@@ -15,6 +15,7 @@ export const PERMISSIONS = {
   'contacts.full': ALL,            // visitor phone / email in full (a role without it sees them masked)
   'leads.view': ALL,
   'leads.status': ALL,             // change a lead's status
+  'chats.takeover': ALL,           // take over a live chat from DES, reply to the visitor, hand it back
   'remarks.add': ALL,              // add remarks to a conversation (e.g. call notes); delete your own
   'leads.export': ADMINS,          // Leads CSV export (and the approved-answer training file)
   'share.create': ALL,             // share links for a conversation (create, list, revoke)
@@ -35,13 +36,13 @@ export const ROUTES = [
   ['GET', '/status', 'signed_in'],
   ['GET', '/stream', 'overview.view'],
   ['GET', '/overview', 'overview.view'], ['GET', '/activity', 'overview.view'], ['GET', '/feedback/summary', 'overview.view'],
-  ['GET', '/conversations', 'conversations.view'], ['GET', '/conversations/:id', 'conversations.view'],
+  ['GET', '/conversations', 'conversations.view'], ['GET', '/conversation-counts', 'conversations.view'], ['POST', '/conversations/:id/outcome', 'leads.status'], ['POST', '/conversations/:id/takeover', 'chats.takeover'], ['POST', '/conversations/:id/reply', 'chats.takeover'], ['POST', '/conversations/:id/handback', 'chats.takeover'], ['POST', '/conversations/:id/outcome/undo', 'leads.status'], ['GET', '/conversations/:id', 'conversations.view'],
   ['GET', '/conversations/:id/detail', 'conversations.view'], ['GET', '/conversations/:id/history', 'conversations.view'],
   ['GET', '/leads', 'leads.view'], ['PUT', '/leads/:id', 'leads.status'],
   ['GET', '/conversations/:id/remarks', 'conversations.view'], ['POST', '/conversations/:id/remarks', 'remarks.add'], ['DELETE', '/remarks/:id', 'remarks.add'],
   ['GET', '/export/leads.csv', 'leads.export'], ['GET', '/export/finetune.jsonl', 'leads.export'],
   ['POST', '/conversations/:id/share', 'share.create'], ['GET', '/shares', 'share.create'], ['DELETE', '/shares/:id', 'share.create'],
-  ['GET', '/products', 'finetune.manage'], ['GET', '/products/:name', 'finetune.manage'], ['PUT', '/products/:name/notes', 'finetune.manage'],
+  ['GET', '/products', 'finetune.manage'], ['GET', '/products/:name', 'finetune.manage'], ['PUT', '/products/:name/notes', 'finetune.manage'], ['PUT', '/products/:name', 'finetune.manage'], ['POST', '/products/check', 'finetune.manage'],
   ['GET', '/golden', 'finetune.manage'], ['POST', '/golden', 'finetune.manage'], ['PUT', '/golden/:id', 'finetune.manage'], ['DELETE', '/golden/:id', 'finetune.manage'],
   ['POST', '/test', 'finetune.manage'], ['POST', '/match', 'finetune.manage'], ['GET', '/review-queue', 'finetune.manage'],
   ['GET', '/kb', 'kb.manage'], ['PUT', '/kb/:id', 'kb.manage'], ['POST', '/ingest', 'kb.manage'],

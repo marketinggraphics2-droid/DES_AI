@@ -3,15 +3,9 @@ import { q } from './db.js';
 import { cfg } from './config.js';
 import { embed, toVector } from './embeddings.js';
 
-export const PRODUCTS = ['SAP Business One', 'IQ Ai', 'IQ People', 'IQ Ecom', 'IQ Portal', 'IQ Tax', 'IQ Workplace', 'IQ Desk', 'IQ Barcode', 'IQ Link', 'IQ Tech Institute', 'IQ REM'];
-const ALIASES = { 'sap b1': 'SAP Business One', sap: 'SAP Business One', 'iq ai': 'IQ Ai', iqai: 'IQ Ai', payroll: 'IQ People', hris: 'IQ People', ecom: 'IQ Ecom', ecommerce: 'IQ Ecom', 'e-commerce': 'IQ Ecom', portal: 'IQ Portal', tax: 'IQ Tax', 'bir cas': 'IQ Tax', cas: 'IQ Tax', workplace: 'IQ Workplace', desk: 'IQ Desk', helpdesk: 'IQ Desk', barcode: 'IQ Barcode', scanner: 'IQ Barcode', link: 'IQ Link', integration: 'IQ Link', lms: 'IQ Tech Institute', training: 'IQ Tech Institute', rem: 'IQ REM', 'real estate': 'IQ REM' };
-
-export function detectProduct(text) {
-  const t = text.toLowerCase();
-  for (const p of PRODUCTS) if (t.includes(p.toLowerCase())) return p;
-  for (const [a, p] of Object.entries(ALIASES)) if (new RegExp(`\\b${a.replace(/[-\s]/g, '[-\\s]?')}\\b`, 'i').test(t)) return p;
-  return null;
-}
+import { productWords } from './products.js';
+// the product list lives in products.js (filled from the website); re-exported for older imports
+export { detectProduct, productNames, isProduct } from './products.js';
 
 /** Returns [{chunk, section, title, url, kind, product, updated_at, score}] */
 export async function search(query, { k = 6, product = null } = {}) {
@@ -112,7 +106,6 @@ const STOP = new Set(('a an the and or but if then so to of in on at by for with
   'system software solution solutions company business businesses product products offer offers service services dynamiq des ' +
   'ba ng mga ang sa si ni po ko ka mo kayo kami namin natin ninyo niyo ito iyan yan yung lang din rin naman pa na ay may meron wala ' +
   'paano ano saan sino bakit kailan pwede puwede gusto kailangan sana salamat kumusta hindi oo sige').split(/\s+/));
-const PRODUCT_WORDS = new Set(['iq', 'sap', 'b1', 'one', 'people', 'ai', 'iqai', 'ecom', 'portal', 'tax', 'workplace', 'desk', 'barcode', 'link', 'tech', 'institute', 'rem']);
 const stem = (w) => {
   for (const suf of ['ations', 'ation', 'ings', 'ing', 'ments', 'ment', 'ions', 'ion', 'ers', 'er', 'ed', 'es', 'ly', 's', 'e']) {
     if (w.endsWith(suf) && w.length - suf.length >= 4) return w.slice(0, -suf.length);
@@ -121,7 +114,8 @@ const stem = (w) => {
 };
 export function contentWords(text) {
   const toks = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
-  return new Set(toks.filter((w) => !STOP.has(w) && !PRODUCT_WORDS.has(w) && (w.length > 1 || /\d/.test(w))).map(stem));
+  const pw = productWords(); // words of the current product names
+  return new Set(toks.filter((w) => !STOP.has(w) && !pw.has(w) &&(w.length > 1 || /\d/.test(w))).map(stem));
 }
 /** 0-1. Dice overlap, or most of the saved phrasing found inside a longer visitor question. */
 export function phraseScore(visitorWords, savedText) {

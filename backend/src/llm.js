@@ -5,6 +5,7 @@
 // MOCK mode (no IQ_GATEWAY_KEY): answers from the retrieved chunks with canned phrasing so the stack runs offline.
 import { cfg, isMock } from './config.js';
 import { toolDefs, runTool } from './tools.js';
+import { onProductsChange } from './products.js';
 import { addUsage } from './db.js';
 
 // tools.js keeps Anthropic-style defs; convert to OpenAI function tools.
@@ -40,9 +41,10 @@ const toGemini = (t) => {
 };
 
 const isGemini = (model) => /^gemini-/i.test(model) || cfg.gateway.provider === 'gemini';
-const openaiTools = toolDefs.map(toOpenAI);
-const geminiTools = toolDefs.map(toGemini);
-const toolsFor = (model) => (isGemini(model) ? geminiTools : openaiTools);
+// rebuilt when the product list changes (the product choices are part of the tool schemas)
+let openaiTools = null, geminiTools = null;
+onProductsChange(() => { openaiTools = geminiTools = null; });
+const toolsFor = (model) => (isGemini(model) ? (geminiTools ||= toolDefs.map(toGemini)) : (openaiTools ||= toolDefs.map(toOpenAI)));
 
 export class GatewayError extends Error {
   constructor(status, body) {
@@ -219,7 +221,7 @@ export async function answer({ system, history, userTurn, ctx, onText, onEvent, 
     }
     // still no words for the visitor (only tool calls): one last round without tools, told to answer now
     if (!finalText.trim() && !dry) {
-      messages.push({ role: 'user', content: 'Answer the visitor now in 2–3 short sentences, using only the search results above. If they do not cover it, say so and offer a consultant.' });
+      messages.push({ role: 'user', content: 'Answer the visitor now in 2–3 short sentences, using only the search results above. If they do not cover it, say so and give the Sales contact.' });
       const r = await streamOnce(buildBody({ model: cfg.model, system, messages, maxTokens: cfg.maxOutputTokens, stream: true, withTools: false }), onText, signal);
       usage.in += r.usage.in; usage.out += r.usage.out; usage.cache += r.usage.cache;
       if (r.usd === null) usdKnown = false; else usd += r.usd;
@@ -277,8 +279,7 @@ async function mockAnswer({ userTurn, ctx, onText, onEvent, onTool, dry = false 
   if (approved) text = '[MOCK · approved answer] ' + approved[1].trim();
   else if (dry) text = docs.length ? `[MOCK] From our website: ${docs[0].chunk.replace(/\s+/g, ' ').slice(0, 240)}… ${docs[0].url}` : '[MOCK] No matching material.';
   else if (/demo|consultant|talk to|human|agent|kausapin/i.test(msg)) {
-    const out = await runTool('handoff_to_human', { reason: 'mock: visitor asked for a person/demo' }, ctx); toolCalls.push({ name: 'handoff_to_human', output: out.result }); await onTool?.(toolCalls.at(-1)); onEvent?.(out.event);
-    text = lang === 'fil' ? 'Sige — ikokonekta kita sa sales consultant namin. Kokontakin ka nila sa loob ng 24 oras (Lun–Biy). Pwede ka ring tumawag sa +63 917-630-4848.' : "Sure — I'll connect you with one of our sales consultants. They'll reach you within 24 hours (Mon–Fri) at the contact you gave, or you can call +63 917-630-4848.";
+    text = lang === 'fil' ? 'Sige — maaabot mo ang sales team namin sa +63 917-630-4848 o sales@dynamiqes.com (Lun–Biy, 8 AM–5 PM).' : 'Sure — you can reach our sales team at +63 917-630-4848 or sales@dynamiqes.com (Mon–Fri, 8 AM–5 PM).';
   } else if (docs.length) {
     const d = docs[0];
     const first = d.chunk.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/).slice(0, 2).join(' ');
@@ -286,7 +287,7 @@ async function mockAnswer({ userTurn, ctx, onText, onEvent, onTool, dry = false 
     toolCalls.push({ name: 'save_lead', output: out.result }); await onTool?.(toolCalls.at(-1)); onEvent?.(out.event);
     text = `${lang === 'fil' ? '[MOCK] Base sa aming website:' : '[MOCK] From our website:'} ${first}\n\n${lang === 'fil' ? 'Higit pa dito' : 'More here'}: ${d.url}\n\n${lang === 'fil' ? 'Ano ang ginagawa ng negosyo mo, para mairekomenda ko ang tamang fit?' : 'What does your business do, so I can point you to the right fit?'}`;
   } else {
-    text = lang === 'fil' ? '[MOCK] Wala akong sapat na impormasyon diyan. Ikokonekta kita sa consultant: sales@dynamiqes.com / +63 917-630-4848.' : "[MOCK] I don't have good material on that. Let me connect you with a consultant: sales@dynamiqes.com / +63 917-630-4848.";
+    text = lang === 'fil' ? '[MOCK] Wala akong sapat na impormasyon diyan. Maaabot mo ang sales team namin: sales@dynamiqes.com / +63 917-630-4848.' : "[MOCK] I don't have good material on that. You can reach our sales team at sales@dynamiqes.com / +63 917-630-4848.";
   }
   for (const w of text.split(/(?<=\s)/)) { onText?.(w); await new Promise((r) => setTimeout(r, 8)); }
   return { text, usage: { in: 0, out: 0, cache: 0 }, toolCalls };

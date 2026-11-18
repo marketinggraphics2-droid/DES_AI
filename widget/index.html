@@ -100,7 +100,7 @@ code{background:var(--panel);border:1px solid var(--line);border-radius:6px;padd
 <script src="widget.js"></script>
 <script>
   const out = document.getElementById('out');
-  window.addEventListener('des:data', e => { const d = e.detail; out.textContent = JSON.stringify({ visitor: d.visitor, lead: d.lead, feedback: d.feedback, handoffs: d.handoffs, conversation: { id: d.conversation.id, lang: d.conversation.lang, messages: d.conversation.messages.length }, last_events: d.events.slice(-6).map(x => x.type) }, null, 2); });
+  window.addEventListener('des:data', e => { const d = e.detail; out.textContent = JSON.stringify({ visitor: d.visitor, lead: d.lead, feedback: d.feedback, conversation: { id: d.conversation.id, lang: d.conversation.lang, messages: d.conversation.messages.length }, last_events: d.events.slice(-6).map(x => x.type) }, null, 2); });
 </script>
 </body>
 </html>

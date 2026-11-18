@@ -104,7 +104,7 @@ read -rsp "Value: " V; echo; sed -i "s|^IQ_GATEWAY_KEY=.*|IQ_GATEWAY_KEY=$V|" /o
 | `ADMIN_ALLOWED_IPS` | IPs that may open `/admin` (currently the office IP). Everyone else gets 404 |
 | `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` | Optional: lets people signed in through Cloudflare Access open `/admin` from anywhere |
 | `EMBEDDINGS_PROVIDER`, `VOYAGE_API_KEY` | `hash` = basic keyword search. `voyage` + key = better search; re-run the ingest after switching |
-| `SMTP_*` | Consultant handoff emails. Empty = emails only appear in the API log |
+| `SMTP_*` | Demo request emails to Sales. Empty = emails only appear in the API log |
 | `TURNSTILE_SECRET` | Cloudflare bot check on "I agree". Empty = off |
 | `DB_PASSWORD` | Random Postgres password, used by the override file. Don't change it after the first start; Postgres keeps the original |
 
