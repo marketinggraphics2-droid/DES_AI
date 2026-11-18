@@ -100,7 +100,8 @@ read -rsp "Value: " V; echo; sed -i "s|^IQ_GATEWAY_KEY=.*|IQ_GATEWAY_KEY=$V|" /o
 | `PUBLIC_URL` | `https://des.dynamiqes.org`. Used in the embed code the dashboard shows |
 | `ALLOWED_ORIGINS` | Fixed list of websites allowed to show the chat. More sites can be added in **Dashboard → Settings → Website widget** without touching `.env` |
 | `ADMIN_TOKEN` | Machine token for `npm run stop` only. People sign in with their own accounts: create the first one with `npm run user:create -- --role superuser --email …` (stop the backend first if it uses the embedded database) |
-| `TRUST_PROXY` | `1` behind the DigitalOcean load balancer, so the real visitor IP is used; `loopback` with cloudflared on the same machine |
+| `TRUST_PROXY` | Which proxies may set the visitor IP. Our droplet: `uniquelocal`, because cloudflared reaches the API through Docker's network, not loopback. `1` behind a DigitalOcean load balancer |
+| `TRUST_CLOUDFLARE` | `true` on our droplet: every request arrives through the Cloudflare Tunnel, so the `CF-Connecting-IP` header is the real visitor IP. Without it the admin IP allowlist sees Docker's address and `/admin` returns 404 |
 | `ADMIN_ALLOWED_IPS` | IPs that may open `/admin` (currently the office IP). Everyone else gets 404 |
 | `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` | Optional: lets people signed in through Cloudflare Access open `/admin` from anywhere |
 | `EMBEDDINGS_PROVIDER`, `VOYAGE_API_KEY` | `hash` = basic keyword search. `voyage` + key = better search; re-run the ingest after switching |
@@ -114,6 +115,7 @@ read -rsp "Value: " V; echo; sed -i "s|^IQ_GATEWAY_KEY=.*|IQ_GATEWAY_KEY=$V|" /o
 |---|---|
 | Allow the chat on a new website | Dashboard → Settings → Website widget → **+ Add website** |
 | Get the embed code | Dashboard → Settings → Website widget → **Copy code** |
+| Create a dashboard account | `cd /opt/des/backend && docker compose exec api node scripts/user.js --role superuser --email name@dynamiqes.com --name "Full Name"`, then type the password when asked. Roles: `superuser`, `admin`, `user`. Reset a password: add `--reset` |
 | Re-read the website now | `cd /opt/des/backend && docker compose exec -T api node scripts/ingest.js --sitemap` |
 | Re-load the scrape in the repo | `docker compose exec -T api node scripts/ingest.js` |
 | Logs | `docker compose logs api -f --tail 100` (in `/opt/des/backend`) |
